@@ -11,7 +11,7 @@ origin_zip = "78750"
 radius_miles = 250
 min_year = 2011
 max_mileage = 150000
-price_min = 7000
+price_min = 6000
 price_max = 10000
 # Listings this far outside the price range are kept as "near misses".
 near_miss_margin = 500
