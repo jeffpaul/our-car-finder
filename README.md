@@ -1,0 +1,68 @@
+# Minivan Finder
+
+Daily search for used Toyota/Honda people-haulers ($8–10k, 2011+, under 160k miles, within 250 driving
+miles of McNeil Dr & US-183 in Austin). New matches and price drops go to your phone through ntfy, and a
+report page is published to GitHub Pages.
+
+## What it checks
+
+| Site | How | Notes |
+| --- | --- | --- |
+| Cars.com | HTTP with Chrome TLS fingerprint | Covers most local dealer inventory. Out-of-area "ships to you" cars are dropped by distance. |
+| Craigslist | Craigslist's JSON search API | All TX areas within the radius (Austin, San Antonio, Houston, Dallas, Killeen, …). |
+| Autotrader | Camoufox (stealth headless Firefox) | Dealer coordinates come with the listing. |
+| CarMax | Camoufox, then CarMax's search API from inside the page | CarMax rarely has anything under $10k. |
+| Facebook Marketplace | Camoufox, logged out | First page of results per city and model only. Mileage, VIN and title status come from opening each new listing once. |
+
+CarGurus is not included: it blocked every automated browser tried.
+
+Listings seen on more than one site (same VIN, or same model, year and exact odometer) are merged into one card with a link to each site.
+
+## Setup
+
+```sh
+uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python -m camoufox fetch          # downloads the stealth Firefox build
+printf '[ntfy]\ntopic = "carfinder-%s"\n' "$(openssl rand -hex 6)" > config.local.toml
+crontab -e   # add:  0 * * * * /path/to/run_daily.sh
+```
+
+`run_daily.sh` exits unless it's 7 AM or 4 PM in America/Chicago, so the hourly cron entry follows daylight saving.
+
+## Files
+
+- `config.toml`: search terms, models, sources, deal scoring, where to publish
+- `config.local.toml` (not committed): the ntfy topic and any other local overrides
+- `finder/models.py`: model list, per-site URL slugs and cargo specs by generation
+- `finder/sources.py`: one scraper per site
+- `finder/deals.py`: deal scoring (price model per model, private-seller adjustment, KBB from Autotrader)
+- `finder/report_template.html`: the report page (data is injected as JSON)
+- `run.py`: the pipeline (scrape → filter → dedupe → distance → photos → notify → report → publish)
+- `data/finder.db`: sqlite history (listings, first/last seen, price history, site health, geocode cache)
+- `out/site/`: the generated report (`index.html` + `thumbs/`)
+- `logs/`: one log per day
+
+## Commands
+
+```sh
+./run_daily.sh                          # what cron runs
+.venv/bin/python run.py --no-publish    # scrape + notify, skip the GitHub Pages push
+.venv/bin/python run.py --report-only --no-publish   # rebuild the page from the database
+.venv/bin/python run.py --sources carscom,craigslist --no-notify --no-publish -v
+```
+
+## Notifications
+
+Install the ntfy app (iOS/Android) and subscribe to the topic in `config.toml` on server `ntfy.sh`.
+You get:
+
+- one push per new listing (photo attached, tap opens the listing; matches are higher priority than near misses)
+- price drops of $300 or more, or drops into the budget
+- a warning when a site fails 3 runs in a row (usually means its markup or bot protection changed)
+
+## Publishing
+
+This repo is private. The report goes to `docs/` in the public repo
+[our-car-finder-report](https://github.com/petenelson/our-car-finder-report), which GitHub Pages serves at
+https://petenelson.github.io/our-car-finder-report/ (marked noindex). `finder/publish.py` keeps a clone of that
+repo in `pages/`, copies in `index.html` and the photos, commits and pushes over SSH.

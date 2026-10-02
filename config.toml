@@ -1,0 +1,48 @@
+# Minivan finder settings. Edit and the next run picks them up.
+
+[search]
+# Vehicles to search for. Keys and cargo specs live in finder/models.py:
+# sienna, odyssey, highlander, pilot, 4runner, rav4, crv, venza, priusv, element
+models = ["sienna", "odyssey", "highlander", "pilot", "4runner", "rav4", "crv", "venza", "priusv", "element"]
+origin_name = "McNeil Dr & US-183, Austin"
+origin_lat = 30.4380
+origin_lon = -97.7590
+origin_zip = "78750"
+radius_miles = 250
+min_year = 2011
+max_mileage = 160000
+price_min = 8000
+price_max = 10000
+# Listings this far outside the price range are kept as "near misses".
+near_miss_margin = 500
+
+[deals]
+# Cars.com is searched across this wider price band to learn what each model/year/mileage sells for.
+market_price_min = 5000
+market_price_max = 16000
+
+[sources]
+carscom = true
+autotrader = true
+carmax = true
+craigslist = true
+facebook = true
+# Facebook Marketplace city slugs to search (logged out, first page of results each).
+facebook_cities = ["austin", "sanantonio", "houston", "dallas"]
+
+[ntfy]
+server = "https://ntfy.sh"
+# Anyone who knows the topic name can read it, so set it in config.local.toml
+# (not committed), e.g.  [ntfy]  topic = "carfinder-<random>"
+topic = ""
+notify_near_misses = true
+# Warn when a source has failed this many runs in a row.
+source_failure_alert_after = 3
+
+[publish]
+# The report is pushed to docs/ in this repo; GitHub Pages serves that folder.
+repo = "git@github.com:petenelson/our-car-finder-report.git"
+branch = "main"
+checkout = "pages"
+path = "docs"
+page_url = "https://petenelson.github.io/our-car-finder-report/"

@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+data/
+out/
+logs/
+pages/
+config.local.toml

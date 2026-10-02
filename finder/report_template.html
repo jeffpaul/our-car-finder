@@ -1,0 +1,423 @@
+<title>Minivan Finder</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: a header with the search terms, a sticky filter bar, then window-sticker cards in an auto-fill grid. */
+:root {
+  --bg: #f1f4f1;
+  --surface: #ffffff;
+  --sunk: #e7ece8;
+  --ink: #16201b;
+  --muted: #5a6a61;
+  --line: #d5ddd7;
+  --accent: #1b6a46;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefe4;
+  --near: #9a5a00;
+  --near-soft: #fbecd2;
+  --new: #1d5bb8;
+  --bad: #b3261e;
+  --deal: #c2410c;
+  --deal-ink: #ffffff;
+  --deal-soft: #ffe4d3;
+  --deal-text: #a3360a;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --deal: #ff8a4c; --deal-ink: #1e0d03; --deal-soft: #3d2113; --deal-text: #ffa877; --bg: #0e1411; --surface: #161f1a; --sunk: #1d2822; --ink: #e4ebe6; --muted: #98aa9f; --line: #2b3830;
+    --accent: #52c08c; --accent-ink: #08170f; --accent-soft: #1d3a2b; --near: #e7a845; --near-soft: #3a2c14;
+    --new: #86b4ff; --bad: #ff8b80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --deal: #ff8a4c; --deal-ink: #1e0d03; --deal-soft: #3d2113; --deal-text: #ffa877; --bg: #0e1411; --surface: #161f1a; --sunk: #1d2822; --ink: #e4ebe6; --muted: #98aa9f; --line: #2b3830;
+  --accent: #52c08c; --accent-ink: #08170f; --accent-soft: #1d3a2b; --near: #e7a845; --near-soft: #3a2c14;
+  --new: #86b4ff; --bad: #ff8b80; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font-body); }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; }
+header { display: grid; gap: 10px; margin-bottom: 18px; }
+.eyebrow { font: 600 12px/1 var(--font-body); letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 700 clamp(34px, 6vw, 52px)/0.95 var(--font-display); margin: 0; letter-spacing: .005em; text-wrap: balance; }
+.terms { color: var(--muted); max-width: 70ch; margin: 0; }
+.terms b { color: var(--ink); font-weight: 600; }
+.tally { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.tally div { display: flex; align-items: baseline; gap: 6px; }
+.tally strong { font: 700 26px/1 var(--font-display); }
+.tally span { color: var(--muted); font-size: 13px; }
+.health { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-src { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--sunk); color: var(--muted); }
+.chip-src::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.chip-src.down::before { background: var(--bad); }
+.chip-src.down { color: var(--bad); }
+
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--line); margin-bottom: 18px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 7px 12px; font: 500 14px var(--font-body); color: var(--ink); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.mchip { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 99px; padding: 5px 11px; font: 500 13px var(--font-body); cursor: pointer; font-variant-numeric: tabular-nums; }
+.mchip .n { color: var(--muted); margin-left: 3px; }
+.mchip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.mchip[aria-pressed="true"] .n { color: inherit; opacity: .75; }
+.mchip:disabled { opacity: .45; cursor: default; }
+select { font: 500 14px var(--font-body); padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.spacer { flex: 1; }
+.filters select, .filters input { font: 500 13.5px var(--font-body); padding: 6px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); max-width: 100%; }
+.filters input { min-width: 0; flex: 1 1 170px; }
+.filters select.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sortwrap { display: inline-flex; align-items: center; gap: 6px; }
+.seg button { white-space: nowrap; }
+.ftoggle { display: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 7px 12px; font: 500 14px var(--font-body); cursor: pointer; }
+.ftoggle span:not(:empty) { margin-left: 6px; background: var(--accent); color: var(--accent-ink); border-radius: 99px; padding: 1px 7px; font-size: 12px; }
+@media (max-width: 700px) {
+  .wrap { padding-block: 18px 48px; }
+  .tally { gap: 4px 16px; }
+  .tally strong { font-size: 22px; }
+  .bar { padding-block: 8px; gap: 6px; }
+  .bar > .row:first-child { flex-wrap: nowrap; }
+  .seg { flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg button { padding: 9px 11px; }
+  .spacer { display: none; }
+  .ftoggle { display: inline-flex; align-items: center; flex: none; min-height: 40px; }
+  #models { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px; }
+  #models::-webkit-scrollbar { display: none; }
+  .mchip { flex: none; padding: 7px 12px; }
+  .bar:not(.open) .filters, .bar:not(.open) .sortwrap { display: none; }
+  .bar.open { max-height: 75vh; overflow-y: auto; }
+  .filters select, .filters input, select { font-size: 16px; flex: 1 1 calc(50% - 6px); min-height: 40px; }
+  .filters input { flex-basis: 100%; }
+  .sortwrap { display: flex; flex-basis: 100%; order: 3; }
+  .sortwrap select { flex: 1; }
+  .bar.open .row:first-child { flex-wrap: wrap; }
+  .photo { aspect-ratio: 3 / 2; }
+  .cardbody { padding: 12px 14px 14px; gap: 10px; }
+  .mini button { padding: 9px 10px; font-size: 14px; }
+  .go { padding: 9px 12px; }
+}
+.linkbtn { background: none; border: 0; color: var(--accent); font: 500 13px var(--font-body); cursor: pointer; padding: 4px 2px; text-decoration: underline; text-underline-offset: 3px; }
+button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 16px; align-items: start; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: grid; min-width: 0; }
+.card.near { border-style: dashed; }
+.card.great { border: 2px solid var(--deal); box-shadow: 0 0 0 4px var(--deal-soft); }
+.badge.great { background: var(--deal); color: var(--deal-ink); }
+.badge.good { background: var(--deal-soft); color: var(--deal-text); }
+.market { font: 500 12px/1.4 var(--font-body); color: var(--muted); }
+.market b { color: var(--deal-text); font-weight: 600; }
+.market .over { color: var(--near); }
+.photo { position: relative; aspect-ratio: 4 / 3; max-width: 100%; background: var(--sunk); overflow: hidden; }
+.photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo .none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+.badges { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { font: 600 11px/1 var(--font-body); letter-spacing: .06em; text-transform: uppercase; padding: 5px 7px; border-radius: 4px; background: var(--surface); color: var(--ink); }
+.badge.new { background: var(--new); color: var(--surface); }
+.badge.near { background: var(--near-soft); color: var(--near); }
+.badge.flag { background: var(--bad); color: var(--surface); }
+.badge.gone { background: var(--ink); color: var(--bg); }
+.cardbody { padding: 14px 16px 16px; display: grid; gap: 12px; min-width: 0; }
+.head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.head h2 { font: 700 23px/1.05 var(--font-display); margin: 0; text-wrap: balance; min-width: 0; }
+.head h2 small { display: block; font: 500 13px/1.3 var(--font-body); color: var(--muted); margin-top: 3px; }
+.price { font: 700 26px/1 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.price small { display: block; font: 500 12px/1.4 var(--font-body); color: var(--accent); }
+.price small.up { color: var(--near); }
+.specs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 0; }
+.specs div { min-width: 0; }
+.specs dt { font: 600 11px/1.2 var(--font-body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.specs dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cargo { background: var(--sunk); border-radius: 8px; padding: 10px 12px; display: grid; gap: 7px; }
+.cargo-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.cargo-top span:first-child { font: 600 11px/1.2 var(--font-body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.cargo-top strong { font: 500 15px var(--font-data); }
+.meter { height: 8px; border-radius: 99px; background: var(--line); position: relative; overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 99px; }
+.meter b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--surface); }
+.cargo-rows { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cargo-rows em { font-style: normal; font-family: var(--font-data); color: var(--ink); }
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.go { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; font: 600 13px var(--font-body); padding: 7px 11px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); }
+.go.alt { background: var(--accent-soft); color: var(--accent); }
+.mini { margin-left: auto; display: flex; gap: 2px; }
+.mini button { background: none; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font: 500 12.5px var(--font-body); padding: 5px 7px; cursor: pointer; }
+.mini button:hover { border-color: var(--line); color: var(--ink); }
+.mini button[aria-pressed="true"] { color: var(--accent); }
+.seen { font-size: 12px; color: var(--muted); }
+.empty { padding: 48px 20px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; }
+.empty strong { display: block; font: 700 22px var(--font-display); color: var(--ink); margin-bottom: 4px; }
+.notes { margin-top: 36px; color: var(--muted); font-size: 13px; max-width: 80ch; display: grid; gap: 6px; }
+.notes h3 { font: 700 18px var(--font-display); color: var(--ink); margin: 0; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 14px 5px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; color: var(--ink); }
+@media (max-width: 480px) { .price { font-size: 23px; } .head h2 { font-size: 21px; } }
+@media (prefers-reduced-motion: no-preference) { .card { transition: border-color .15s; } .card:hover { border-color: var(--muted); } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow" id="checked">Daily used-car watch</div>
+    <h1>Minivan Finder</h1>
+    <p class="terms" id="terms"></p>
+    <div class="tally" id="tally"></div>
+    <div class="health" id="health" aria-label="Sites checked"></div>
+  </header>
+
+  <div class="bar">
+    <div class="row">
+      <div class="seg" role="group" aria-label="Which listings">
+        <button id="v-match" data-view="match">Matches</button>
+        <button id="v-all" data-view="all">+ Near misses</button>
+        <button id="v-deals" data-view="deals">Deals</button>
+        <button id="v-saved" data-view="saved">Saved</button>
+        <button id="v-gone" data-view="gone">Gone</button>
+      </div>
+      <span class="spacer"></span>
+      <button class="ftoggle" id="ftoggle" aria-expanded="false" aria-controls="filterpanel">Filters<span id="fcount"></span></button>
+      <span class="sortwrap"><label for="sort" class="eyebrow">Sort</label>
+      <select id="sort">
+        <option value="drive">Closest first</option>
+        <option value="deal">Best deal</option>
+        <option value="price">Lowest price</option>
+        <option value="miles">Lowest mileage</option>
+        <option value="year">Newest model year</option>
+        <option value="cargo">Most cargo space</option>
+        <option value="seen">Recently listed</option>
+      </select></span>
+    </div>
+    <div class="row" id="models" role="group" aria-label="Vehicle models"></div>
+    <div class="row filters" id="filterpanel">
+      <select id="f-price" aria-label="Maximum price"><option value="">Any price</option></select>
+      <select id="f-miles" aria-label="Maximum mileage"><option value="">Any mileage</option><option value="100000">Under 100k mi</option><option value="120000">Under 120k mi</option><option value="140000">Under 140k mi</option><option value="known">Mileage listed</option></select>
+      <select id="f-dist" aria-label="Maximum drive distance"><option value="">Any distance</option><option value="30">Within 30 mi</option><option value="90">Within 90 mi (San Antonio)</option><option value="180">Within 180 mi (Houston)</option><option value="220">Within 220 mi (DFW)</option></select>
+      <select id="f-seller" aria-label="Seller type"><option value="">Dealers and private</option><option value="dealer">Dealers only</option><option value="private">Private sellers only</option></select>
+      <select id="f-rows" aria-label="Seating rows"><option value="">2 or 3 rows</option><option value="3">3 rows (7–8 seats)</option><option value="2">2 rows</option></select>
+      <select id="f-source" aria-label="Site"><option value="">All sites</option></select>
+      <input id="f-q" type="search" placeholder="Search trim, city, seller" aria-label="Search listings">
+      <button class="linkbtn" id="resetFilters" hidden>Reset filters</button>
+    </div>
+    <div class="count" id="count"></div>
+  </div>
+
+  <main class="grid" id="grid"></main>
+  <p class="row" id="hiddenNote" hidden><button class="linkbtn" id="showHidden"></button></p>
+
+  <section class="notes">
+    <h3>Cargo space by model</h3>
+    <p>Manufacturer figures in cubic feet for the generations in range. "Max" is behind the front seats with the rear seats folded or removed. The bar on each card is scaled to 160 cu ft, and the tick marks space behind the 2nd row.</p>
+    <div class="tablewrap"><table id="cargoTable"></table></div>
+    <h3>How deals are rated</h3>
+    <p>Each run records the asking price, year and mileage of every listing of these models, including a wider $5k–$16k sample from Cars.com and all of CarMax. A price curve per model, fitted to the last 45 days, gives the expected price for a car's year and mileage. Autotrader listings use Kelley Blue Book's fair purchase price instead. <b>Great deal</b> means at least 15% under expected (or $1,500 under and 7.5% under). <b>Good deal</b> means at least 7% under (or $700 and 3.5%). More than 40% under is marked <b>Too good to be true?</b>: on Facebook especially, that is usually a down-payment ad or a scam. A listing that mentions title or mechanical trouble tops out at Good. Unusually cheap private listings can be scams, so see the car and the title before paying anything.</p>
+    <p id="footer"></p>
+  </section>
+</div>
+
+<script type="application/json" id="data">__DATA__</script>
+<script>
+(() => {
+  const { meta, items } = JSON.parse(document.getElementById("data").textContent);
+  const $ = (id) => document.getElementById(id);
+  const money = (n) => n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US");
+  const num = (n) => n == null ? "—" : Math.round(n).toLocaleString("en-US");
+  const fmtDate = (iso) => new Date(iso + (iso.length === 10 ? "T12:00:00" : "")).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("mf:" + k); return v ? JSON.parse(v) : d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("mf:" + k, JSON.stringify(v)); } catch {} },
+  };
+  const state = {
+    view: store.get("view", "match"),
+    sort: store.get("sort", "drive"),
+    models: new Set(store.get("models", [])),
+    saved: new Set(store.get("saved", [])),
+    hidden: new Set(store.get("hidden", [])),
+    showHidden: false,
+    f: Object.assign({ price: "", miles: "", dist: "", seller: "", rows: "", source: "", q: "" }, store.get("filters", {})),
+  };
+  const FILTERS = ["price", "miles", "dist", "seller", "rows", "source", "q"];
+  for (let p = meta.priceMin + 500; p <= meta.priceMax + meta.margin; p += 500)
+    $("f-price").insertAdjacentHTML("beforeend", `<option value="${p}">Up to ${money(p)}</option>`);
+  [...new Set(items.flatMap((i) => Object.keys(i.links)))].sort()
+    .forEach((s) => $("f-source").insertAdjacentHTML("beforeend", `<option value="${esc(s)}">${esc(s)}</option>`));
+  function passes(i) {
+    const f = state.f;
+    if (f.price && i.price > +f.price) return false;
+    if (f.miles === "known" && !i.mileage) return false;
+    if (f.miles && f.miles !== "known" && !(i.mileage && i.mileage < +f.miles)) return false;
+    if (f.dist && !(i.driveMi != null && i.driveMi <= +f.dist)) return false;
+    if (f.seller === "dealer" && i.private) return false;
+    if (f.seller === "private" && !i.private) return false;
+    if (f.rows === "3" && !i.cargo?.row3) return false;
+    if (f.rows === "2" && i.cargo?.row3) return false;
+    if (f.source && !(f.source in i.links)) return false;
+    if (f.q) {
+      const hay = [i.year, i.make, i.model, i.trim, i.title, i.city, i.seller].join(" ").toLowerCase();
+      if (!f.q.toLowerCase().split(/\s+/).every((w) => hay.includes(w))) return false;
+    }
+    return true;
+  }
+
+  // Header
+  const gen = new Date(meta.generated);
+  $("checked").textContent = "Daily used-car watch · checked " + gen.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  $("terms").innerHTML = `<b>${money(meta.priceMin)}–${money(meta.priceMax)}</b>, <b>${meta.minYear} or newer</b>, <b>under ${num(meta.maxMileage)} miles</b>, within <b>${meta.radius} driving miles</b> of ${meta.origin}. Near misses are within ${money(meta.margin)} of the budget.`;
+  const active = items.filter((i) => !i.gone);
+  const matches = active.filter((i) => i.tier === "match");
+  const closest = matches.filter((i) => i.driveMi != null).sort((a, b) => a.driveMi - b.driveMi)[0];
+  const tally = [
+    [matches.length, matches.length === 1 ? "match" : "matches"],
+    [active.length - matches.length, "near misses"],
+    [active.filter((i) => i.deal?.label === "great").length, "great deals"],
+    [active.filter((i) => i.isNew).length, "new in the last 24 hours"],
+  ];
+  if (closest) tally.push([closest.driveMi + " mi", "closest match"]);
+  $("tally").innerHTML = tally.map(([n, l]) => `<div><strong>${n}</strong><span>${l}</span></div>`).join("");
+  const names = { carscom: "Cars.com", autotrader: "Autotrader", carmax: "CarMax", craigslist: "Craigslist", facebook: "Facebook Marketplace" };
+  $("health").innerHTML = meta.health.map((h) => {
+    const label = names[h.name] || h.name;
+    const title = h.ok ? `${h.count ?? 0} listings scanned` : `Failing ${h.failures} run(s): ${h.error || ""}`;
+    return `<span class="chip-src${h.ok ? "" : " down"}" title="${esc(title)}">${label}${h.ok ? "" : " · not loading"}</span>`;
+  }).join("");
+
+  // Cargo table
+  $("cargoTable").innerHTML = "<tr><th>Model</th><th>Body</th><th>Seats</th><th>Years</th><th>Max</th><th>Behind 2nd row</th><th>Behind 3rd row</th></tr>" +
+    meta.models.flatMap((m) => m.cargo.filter((g) => g[1] >= meta.minYear).map((g) =>
+      `<tr><td>${m.name}</td><td>${m.body}</td><td>${m.seats}</td><td>${Math.max(g[0], meta.minYear)}–${g[1] >= 2030 ? "now" : g[1]}</td><td>${g[2]}</td><td>${g[3]}</td><td>${g[4] ?? "—"}</td></tr>`)).join("");
+  $("footer").textContent = `Listings that disappear from every site that showed them stay under "Gone" for ${meta.goneDays} days. Saved and hidden cars are remembered in this browser only.`;
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+
+  function inView(i) {
+    if (state.view === "gone") return !!i.gone;
+    if (i.gone) return false;
+    if (state.view === "saved") return state.saved.has(i.key);
+    if (state.view === "deals") return ["great", "good"].includes(i.deal?.label);
+    if (state.view === "match") return i.tier === "match";
+    return true;
+  }
+
+  function renderModels() {
+    const base = items.filter(inView).filter(passes);
+    $("models").innerHTML = meta.models.map((m) => {
+      const n = base.filter((i) => i.modelKey === m.key).length;
+      const on = state.models.has(m.key);
+      return `<button class="mchip" data-model="${m.key}" aria-pressed="${on}" ${n || on ? "" : "disabled"}>${m.short}<span class="n">${n}</span></button>`;
+    }).join("") + (state.models.size ? `<button class="linkbtn" id="clearModels">All models</button>` : "");
+  }
+
+  const sorters = {
+    drive: (a, b) => (a.driveMi ?? 9999) - (b.driveMi ?? 9999),
+    price: (a, b) => a.price - b.price,
+    miles: (a, b) => (a.mileage ?? 1e9) - (b.mileage ?? 1e9),
+    year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
+    cargo: (a, b) => (b.cargo?.max ?? 0) - (a.cargo?.max ?? 0),
+    seen: (a, b) => b.firstSeen.localeCompare(a.firstSeen),
+    deal: (a, b) => (b.deal?.pct ?? (b.deal?.label === "great" ? 20 : b.deal?.label === "good" ? 8 : -99)) - (a.deal?.pct ?? (a.deal?.label === "great" ? 20 : a.deal?.label === "good" ? 8 : -99)),
+  };
+
+  function card(i) {
+    const name = [i.year ?? "Year ?", i.make, i.model].join(" ");
+    const sub = [i.trim, i.body].filter(Boolean).join(" · ");
+    const badges = [];
+    if (i.gone) badges.push(`<span class="badge gone">Gone ${fmtDate(i.gone)}</span>`);
+    else if (i.isNew) badges.push(`<span class="badge new">New</span>`);
+    const dl = i.deal?.label;
+    if (dl === "great") badges.push(`<span class="badge great">Great deal</span>`);
+    else if (dl === "good") badges.push(`<span class="badge good">Good deal</span>`);
+    else if (dl === "suspect") badges.push(`<span class="badge flag" title="Priced far below similar cars. Often a down-payment ad, a scam, or a branded title.">Too good to be true?</span>`);
+    if (i.tier === "near") badges.push(`<span class="badge near">Near miss</span>`);
+    if (i.flags?.length) badges.push(`<span class="badge flag" title="The listing mentions: ${esc(i.flags.join(", "))}">Check: ${esc(i.flags[0])}</span>`);
+    let change = "";
+    if (i.firstPrice && i.price !== i.firstPrice) {
+      const d = i.price - i.firstPrice;
+      change = `<small class="${d > 0 ? "up" : ""}">${d < 0 ? "↓" : "↑"} ${money(Math.abs(d))} since ${fmtDate(i.firstSeen)}</small>`;
+    }
+    let market = "";
+    if (i.deal?.expected) {
+      const d = i.deal.delta;
+      market = `<div class="market">Typical price ≈ ${money(i.deal.expected)} (${esc(i.deal.basis)}) · ${d >= 0 ? `<b>${money(d)} under</b>` : `<span class="over">${money(-d)} over</span>`}</div>`;
+    } else if (i.deal?.basis) {
+      market = `<div class="market">Rated a ${esc(i.deal.label)} deal by ${esc(i.deal.basis.replace(" rating", ""))}</div>`;
+    }
+    const drive = i.driveMi != null ? `${i.driveMi} mi${i.driveMin ? ` · ${i.driveMin >= 60 ? Math.floor(i.driveMin / 60) + "h " + (i.driveMin % 60) + "m" : i.driveMin + "m"}` : ""}` : "—";
+    const c = i.cargo;
+    const cargo = c ? `<div class="cargo">
+        <div class="cargo-top"><span>Cargo space</span><strong>${c.max} cu ft</strong></div>
+        <div class="meter" role="img" aria-label="${c.max} cubic feet maximum"><i style="width:${Math.min(100, c.max / 160 * 100)}%"></i><b style="left:${Math.min(100, c.row2 / 160 * 100)}%"></b></div>
+        <div class="cargo-rows"><span>Behind 2nd row <em>${c.row2}</em></span>${c.row3 ? `<span>Behind 3rd row <em>${c.row3}</em></span>` : ""}<span>Seats <em>${esc(i.seats)}</em></span></div>
+      </div>` : "";
+    const links = Object.entries(i.links).map(([src, url], n) =>
+      `<a class="go${n ? " alt" : ""}" href="${esc(url)}" target="_blank" rel="noopener">${esc(src)} ↗</a>`).join("");
+    const saved = state.saved.has(i.key), hidden = state.hidden.has(i.key);
+    return `<article class="card${i.tier === "near" ? " near" : ""}${dl === "great" && !i.gone ? " great" : ""}">
+      <div class="photo">${i.thumb ? `<img src="${esc(i.thumb)}" alt="${esc(name)}" loading="lazy">` : `<div class="none">No photo</div>`}
+        <div class="badges">${badges.join("")}</div></div>
+      <div class="cardbody">
+        <div class="head"><h2>${esc(name)}${sub ? `<small>${esc(sub)}</small>` : ""}</h2><div class="price">${money(i.price)}${change}</div></div>
+        ${market}
+        <dl class="specs">
+          <div><dt>Mileage</dt><dd>${i.mileage ? num(i.mileage) + " mi" : "Not listed"}</dd></div>
+          <div><dt>Drive from home</dt><dd>${drive}</dd></div>
+          <div><dt>Location</dt><dd>${esc(i.city || "Unknown")}</dd></div>
+          <div><dt>Seller</dt><dd>${esc(i.seller || "—")}</dd></div>
+        </dl>
+        ${cargo}
+        <div class="foot">${links}
+          <div class="mini"><button data-save="${esc(i.key)}" aria-pressed="${saved}">${saved ? "★ Saved" : "☆ Save"}</button><button data-hide="${esc(i.key)}">${hidden ? "Unhide" : "Hide"}</button></div>
+        </div>
+        <div class="seen">First seen ${fmtDate(i.firstSeen)}${i.title && i.title.toLowerCase() !== name.toLowerCase() ? ` · “${esc(i.title)}”` : ""}</div>
+      </div></article>`;
+  }
+
+  function render() {
+    for (const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", b.dataset.view === state.view);
+    $("sort").value = state.sort;
+    renderModels();
+    for (const k of FILTERS) { const el = $("f-" + k); if (el.value !== state.f[k]) el.value = state.f[k]; el.classList.toggle("on", !!state.f[k] && k !== "q"); }
+    const inScope = items.filter(inView);
+    let list = inScope.filter(passes).filter((i) => !state.models.size || state.models.has(i.modelKey));
+    $("count").textContent = `Showing ${list.length - (state.showHidden ? 0 : list.filter((i) => state.hidden.has(i.key)).length)} of ${inScope.length}`;
+    $("resetFilters").hidden = !FILTERS.some((k) => state.f[k]) && !state.models.size;
+    const active = FILTERS.filter((k) => state.f[k]).length;
+    $("fcount").textContent = active ? active : "";
+    const hiddenCount = list.filter((i) => state.hidden.has(i.key)).length;
+    if (!state.showHidden) list = list.filter((i) => !state.hidden.has(i.key));
+    list.sort(sorters[state.sort]);
+    $("grid").innerHTML = list.length ? list.map(card).join("") : `<div class="empty"><strong>${
+      state.view === "saved" ? "No saved cars yet" : state.view === "deals" ? "No standout deals right now" : state.view === "gone" ? "Nothing has sold or disappeared lately" : "Nothing matches right now"}</strong>${
+      state.view === "saved" ? "Tap ☆ Save on a listing to keep it here." : state.view === "match" ? "Try “With near misses”, or check back after tomorrow's scan." : "The next daily scan may turn something up."}</div>`;
+    $("hiddenNote").hidden = !hiddenCount;
+    $("showHidden").textContent = state.showHidden ? "Hide the cars you've hidden" : `Show ${hiddenCount} hidden car${hiddenCount === 1 ? "" : "s"}`;
+  }
+
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest("button");
+    if (!t) return;
+    if (t.dataset.view) { state.view = t.dataset.view; store.set("view", state.view); }
+    else if (t.dataset.model) { state.models.has(t.dataset.model) ? state.models.delete(t.dataset.model) : state.models.add(t.dataset.model); store.set("models", [...state.models]); }
+    else if (t.id === "clearModels") { state.models.clear(); store.set("models", []); }
+    else if (t.dataset.save) { const k = t.dataset.save; state.saved.has(k) ? state.saved.delete(k) : state.saved.add(k); store.set("saved", [...state.saved]); }
+    else if (t.dataset.hide) { const k = t.dataset.hide; state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k); store.set("hidden", [...state.hidden]); }
+    else if (t.id === "ftoggle") { const open = document.querySelector(".bar").classList.toggle("open"); t.setAttribute("aria-expanded", open); return; }
+    else if (t.id === "showHidden") { state.showHidden = !state.showHidden; }
+    else if (t.id === "resetFilters") { FILTERS.forEach((k) => state.f[k] = ""); state.models.clear(); store.set("models", []); store.set("filters", state.f); }
+    else return;
+    render();
+  });
+  for (const k of FILTERS) {
+    $("f-" + k).addEventListener(k === "q" ? "input" : "change", (e) => { state.f[k] = e.target.value; store.set("filters", state.f); render(); });
+  }
+  $("sort").addEventListener("change", (e) => { state.sort = e.target.value; store.set("sort", state.sort); render(); });
+  render();
+})();
+</script>
