@@ -48,6 +48,7 @@ class Notifier:
             log.info("[notify disabled] %s | %s", title, body.replace("\n", " | "))
             return
         headers = {"Title": title.encode("utf-8").decode("latin-1", "ignore")}
+        click = click or self.report_url  # summaries without a single listing open the report
         if click:
             headers["Click"] = click
         if tags:
