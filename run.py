@@ -29,6 +29,7 @@ from finder import models as M
 from finder.deals import Market, record_market, thresholds, update_thresholds
 from finder import sources as S
 from finder.geo import Geo
+from finder.reliability import Reliability
 from finder.notify import Notifier
 from finder.publish import publish
 from finder.report import build_report
@@ -242,8 +243,8 @@ def score(market, x, cut):
     return d
 
 
-def rescore(db):
-    """Re-rates every active listing against the latest market data."""
+def rescore(db, rel):
+    """Re-rates every active listing against the latest market data and reliability ratings."""
     record_market(db, [], dt.date.today().isoformat())
     market = Market(db)
     rows = [(k, json.loads(d)) for k, d in db.execute("SELECT key, data FROM listings WHERE gone_on IS NULL")]
@@ -252,6 +253,7 @@ def rescore(db):
     for key, x in rows:
         x["flags"] = trouble_flags(x.get("title") or "", x.get("flags") or [])
         x["deal"] = score(market, x, cut)
+        x["reliability"] = rel.rating(x["model_key"], x.get("year"))
         db.execute("UPDATE listings SET data=? WHERE key=?", (json.dumps(x), key))
     db.commit()
 
@@ -287,6 +289,8 @@ def main():
     now = dt.datetime.now().astimezone()
     today = now.date().isoformat()
     notifier = Notifier(cfg, enabled=not args.no_notify)
+    rel = Reliability(db)
+    rel.refresh(models, cfg["search"]["min_year"], dt.date.today().year - 2)
 
     if not args.report_only:
         first_run = db.execute("SELECT COUNT(*) FROM listings").fetchone()[0] == 0
@@ -332,6 +336,7 @@ def main():
                 new_items.append(merged)
             merged["thumb"] = merged.get("thumb") or thumb_for(key, n["image_url"], http)
             merged["deal"] = score(market, merged, cut)
+            merged["reliability"] = rel.rating(merged["model_key"], merged.get("year"))
             db.execute("""INSERT INTO listings (key, data, first_seen, last_seen, gone_on) VALUES (?,?,?,?,NULL)
                           ON CONFLICT(key) DO UPDATE SET data=excluded.data, last_seen=excluded.last_seen, gone_on=NULL""",
                        (key, json.dumps(merged), first_seen, now.isoformat()))
@@ -373,7 +378,7 @@ def main():
             db.executemany("UPDATE source_health SET alerted=1 WHERE source=?", [(f[0],) for f in failing])
             db.commit()
 
-    rescore(db)
+    rescore(db, rel)
     site = build_report(db, cfg, models, ROOT / "out" / "site", THUMBS, now)
     log.info("report written to %s", site)
 

@@ -154,6 +154,17 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid
 .meter b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--surface); }
 .cargo-rows { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cargo-rows em { font-style: normal; font-family: var(--font-data); color: var(--ink); }
+.rel { border-top: 1px solid var(--line); padding-top: 10px; font-size: 13.5px; }
+.rel summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; list-style: none; }
+.rel summary::-webkit-details-marker { display: none; }
+.rel summary::after { content: "Details"; margin-left: auto; font-size: 12.5px; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.rel[open] summary::after { content: "Hide"; }
+.rel .lbl { font: 600 11px/1.2 var(--font-body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.stars { color: var(--accent); letter-spacing: 1px; font-size: 15px; }
+.stars.low { color: var(--near); }
+.rel .rl { color: var(--muted); }
+.rel-body { display: grid; gap: 4px; margin-top: 6px; color: var(--muted); }
+.rel-body b { color: var(--ink); font-weight: 600; }
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .go { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; font: 600 13px var(--font-body); padding: 7px 11px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); }
 .go.alt { background: var(--accent-soft); color: var(--accent); }
@@ -200,6 +211,7 @@ th { font-weight: 600; color: var(--ink); }
       <select id="sort">
         <option value="deal">Best deal</option>
         <option value="drive">Closest first</option>
+        <option value="rel">Most reliable</option>
         <option value="price">Lowest price</option>
         <option value="miles">Lowest mileage</option>
         <option value="year">Newest model year</option>
@@ -214,6 +226,7 @@ th { font-weight: 600; color: var(--ink); }
       <select id="f-dist" aria-label="Maximum drive distance"><option value="">Any distance</option><option value="30">Within 30 mi</option><option value="90">Within 90 mi (San Antonio)</option><option value="180">Within 180 mi (Houston)</option><option value="220">Within 220 mi (DFW)</option></select>
       <select id="f-seller" aria-label="Seller type"><option value="">Dealers and private</option><option value="dealer">Dealers only</option><option value="private">Private sellers only</option></select>
       <select id="f-rows" aria-label="Seating rows"><option value="">2 or 3 rows</option><option value="3">3 rows (7–8 seats)</option><option value="2">2 rows</option></select>
+      <select id="f-rel" aria-label="Reliability"><option value="">Any reliability</option><option value="4">4+ stars</option><option value="3">3+ stars</option></select>
       <select id="f-source" aria-label="Site"><option value="">All sites</option></select>
       <input id="f-q" type="search" placeholder="Search trim, city, seller" aria-label="Search listings">
       <button class="linkbtn" id="resetFilters" hidden>Reset filters</button>
@@ -228,6 +241,8 @@ th { font-weight: 600; color: var(--ink); }
     <h3>Cargo space by model</h3>
     <p>Manufacturer figures in cubic feet for the generations in range. "Max" is behind the front seats with the rear seats folded or removed. The bar on each card is scaled to 160 cu ft, and the tick marks space behind the 2nd row.</p>
     <div class="tablewrap"><table id="cargoTable"></table></div>
+    <h3>How reliability is rated</h3>
+    <p>Stars come from owner complaints filed with NHTSA (the federal safety agency) for each model year, per 10,000 vehicles sold, ranked against every model year in this search: the fewest complaints get 5 stars, the most get 1. Airbag complaints are left out because most follow the Takata recall rather than how a car holds up. Sales figures are rough averages, so treat the stars as a guide. The recall count is for the model year; check a specific car's VIN at nhtsa.gov/recalls for open recalls. Known-issue notes summarize commonly reported problems for each generation.</p>
     <h3>How deals are rated</h3>
     <p>Each run records the asking price, year and mileage of every listing of these models, including a wider $5k–$16k sample from Cars.com and all of CarMax. A price curve per model, fitted to the last 45 days, gives the expected price for a car's year and mileage. Autotrader listings use Kelley Blue Book's fair purchase price instead. <b>Great deal</b> means at least 15% under expected (or $1,500 under and 7.5% under). <b>Good deal</b> means at least 7% under (or $700 and 3.5%). More than 40% under is marked <b>Too good to be true?</b>: on Facebook especially, that is usually a down-payment ad or a scam. A listing that mentions title or mechanical trouble tops out at Good. Unusually cheap private listings can be scams, so see the car and the title before paying anything.</p>
     <p id="footer"></p>
@@ -253,9 +268,9 @@ th { font-weight: 600; color: var(--ink); }
     saved: new Set(store.get("saved", [])),
     hidden: new Set(store.get("hidden", [])),
     showHidden: false,
-    f: Object.assign({ price: "", miles: "", dist: "", seller: "", rows: "", source: "", q: "" }, store.get("filters", {})),
+    f: Object.assign({ price: "", miles: "", dist: "", seller: "", rows: "", rel: "", source: "", q: "" }, store.get("filters", {})),
   };
-  const FILTERS = ["price", "miles", "dist", "seller", "rows", "source", "q"];
+  const FILTERS = ["price", "miles", "dist", "seller", "rows", "rel", "source", "q"];
   for (let p = meta.priceMin + 500; p <= meta.priceMax + meta.margin; p += 500)
     $("f-price").insertAdjacentHTML("beforeend", `<option value="${p}">Up to ${money(p)}</option>`);
   [...new Set(items.flatMap((i) => Object.keys(i.links)))].sort()
@@ -270,6 +285,7 @@ th { font-weight: 600; color: var(--ink); }
     if (f.seller === "private" && !i.private) return false;
     if (f.rows === "3" && !i.cargo?.row3) return false;
     if (f.rows === "2" && i.cargo?.row3) return false;
+    if (f.rel && !((i.rel?.stars ?? 0) >= +f.rel)) return false;
     if (f.source && !(f.source in i.links)) return false;
     if (f.q) {
       const hay = [i.year, i.make, i.model, i.trim, i.title, i.city, i.seller].join(" ").toLowerCase();
@@ -333,6 +349,7 @@ th { font-weight: 600; color: var(--ink); }
     price: (a, b) => a.price - b.price,
     miles: (a, b) => (a.mileage ?? 1e9) - (b.mileage ?? 1e9),
     year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
+    rel: (a, b) => (b.rel?.stars ?? 0) - (a.rel?.stars ?? 0) || (a.rel?.per10k ?? 999) - (b.rel?.per10k ?? 999),
     cargo: (a, b) => (b.cargo?.max ?? 0) - (a.cargo?.max ?? 0),
     seen: (a, b) => b.firstSeen.localeCompare(a.firstSeen),
     // Great, then good, fair, high; within a label, biggest discount first. Suspect and unrated go last.
@@ -370,6 +387,13 @@ th { font-weight: 600; color: var(--ink); }
         <div class="meter" role="img" aria-label="${c.max} cubic feet maximum"><i style="width:${Math.min(100, c.max / 160 * 100)}%"></i><b style="left:${Math.min(100, c.row2 / 160 * 100)}%"></b></div>
         <div class="cargo-rows"><span>Behind 2nd row <em>${c.row2}</em></span>${c.row3 ? `<span>Behind 3rd row <em>${c.row3}</em></span>` : ""}<span>Seats <em>${esc(i.seats)}</em></span></div>
       </div>` : "";
+    const r = i.rel;
+    let rel = "";
+    if (r) {
+      const stars = r.stars ? `<span class="stars${r.stars <= 2 ? " low" : ""}" aria-label="${r.stars} of 5 stars">${"★".repeat(r.stars)}${"☆".repeat(5 - r.stars)}</span><span class="rl">${esc(r.label)}</span>` : `<span class="rl">Not rated</span>`;
+      const facts = r.stars ? `<div><b>${r.per10k}</b> complaints per 10k sold · <b>${r.recalls}</b> recall${r.recalls === 1 ? "" : "s"} for this model year</div>${r.components?.length ? `<div>Most complaints: ${esc(r.components.join(", ").toLowerCase())}</div>` : ""}` : "";
+      rel = `<details class="rel"><summary><span class="lbl">Reliability</span>${stars}</summary><div class="rel-body">${facts}${r.issues ? `<div>${esc(r.issues)}</div>` : ""}</div></details>`;
+    }
     const links = Object.entries(i.links).map(([src, url], n) =>
       `<a class="go${n ? " alt" : ""}" href="${esc(url)}" target="_blank" rel="noopener">${esc(src)} ↗</a>`).join("");
     const saved = state.saved.has(i.key), hidden = state.hidden.has(i.key);
@@ -386,6 +410,7 @@ th { font-weight: 600; color: var(--ink); }
           <div><dt>Seller</dt><dd>${esc(i.seller || "—")}</dd></div>
         </dl>
         ${cargo}
+        ${rel}
         <div class="foot">${links}
           <div class="mini"><button data-save="${esc(i.key)}" aria-pressed="${saved}">${saved ? "★ Saved" : "☆ Save"}</button><button data-hide="${esc(i.key)}">${hidden ? "Unhide" : "Hide"}</button></div>
         </div>

@@ -20,6 +20,9 @@ def describe(x):
     bits.append(where)
     if x.get("cargo"):
         bits.append(f'cargo {x["cargo"]["max"]:.0f} cu ft')
+    r = x.get("reliability") or {}
+    if r.get("stars"):
+        bits.append(f'reliability {"★" * r["stars"]}{"☆" * (5 - r["stars"])}')
     line = " · ".join(bits)
     d = x.get("deal")
     if d and d.get("expected") and d["label"] in ("great", "good"):
@@ -29,6 +32,11 @@ def describe(x):
     if x.get("flags"):
         extra += f' — mentions: {", ".join(x["flags"])}'
     return f"{line}\n{extra}"
+
+
+def is_suspect(x):
+    """Listings priced far below similar cars (usually down-payment ads or scams) aren't worth a push."""
+    return (x.get("deal") or {}).get("label") == "suspect"
 
 
 def headline(x):
@@ -66,6 +74,7 @@ class Notifier:
             log.error("ntfy send failed: %s", e)
 
     def new_listings(self, items):
+        items = [x for x in items if not is_suspect(x)]
         rank = {"great": 0, "good": 1}
         items = sorted(items, key=lambda x: (rank.get((x.get("deal") or {}).get("label"), 2),
                                              x["tier"] != "match", x.get("drive_mi") or 999))
@@ -85,6 +94,7 @@ class Notifier:
             self.send(f"{len(rest)} more new listings", "\n".join(lines), tags="red_car")
 
     def price_drops(self, drops):
+        drops = [(x, p) for x, p in drops if not is_suspect(x)]
         for x, old_price in drops[:MAX_INDIVIDUAL]:
             self.send(f"Price drop: {headline(x)}",
                       f'{fmt_money(old_price)} → {describe(x)}',

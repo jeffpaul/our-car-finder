@@ -38,7 +38,7 @@ def build_report(db, cfg, models, site_dir, thumbs_dir, now):
             "private": d.get("private"), "city": d.get("city"), "driveMi": d.get("drive_mi"),
             "driveMin": d.get("drive_min"), "cargo": d.get("cargo"), "body": d.get("body"),
             "seats": d.get("seats"), "links": d.get("links", {}), "flags": d.get("flags", []),
-            "thumb": thumb, "firstSeen": fs.date().isoformat(), "deal": d.get("deal"),
+            "thumb": thumb, "firstSeen": fs.date().isoformat(), "deal": d.get("deal"), "rel": d.get("reliability"),
             "isNew": gone_on is None and (now - fs).total_seconds() < NEW_HOURS * 3600,
             "gone": gone_on,
         })
