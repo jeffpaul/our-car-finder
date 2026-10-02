@@ -188,9 +188,9 @@ th { font-weight: 600; color: var(--ink); }
   <div class="bar">
     <div class="row">
       <div class="seg" role="group" aria-label="Which listings">
+        <button id="v-deals" data-view="deals">Deals</button>
         <button id="v-match" data-view="match">Matches</button>
         <button id="v-all" data-view="all">+ Near misses</button>
-        <button id="v-deals" data-view="deals">Deals</button>
         <button id="v-saved" data-view="saved">Saved</button>
         <button id="v-gone" data-view="gone">Gone</button>
       </div>
@@ -198,8 +198,8 @@ th { font-weight: 600; color: var(--ink); }
       <button class="ftoggle" id="ftoggle" aria-expanded="false" aria-controls="filterpanel">Filters<span id="fcount"></span></button>
       <span class="sortwrap"><label for="sort" class="eyebrow">Sort</label>
       <select id="sort">
-        <option value="drive">Closest first</option>
         <option value="deal">Best deal</option>
+        <option value="drive">Closest first</option>
         <option value="price">Lowest price</option>
         <option value="miles">Lowest mileage</option>
         <option value="year">Newest model year</option>
@@ -247,8 +247,8 @@ th { font-weight: 600; color: var(--ink); }
     set(k, v) { try { localStorage.setItem("mf:" + k, JSON.stringify(v)); } catch {} },
   };
   const state = {
-    view: store.get("view", "match"),
-    sort: store.get("sort", "drive"),
+    view: store.get("view2", "deals"),
+    sort: store.get("sort2", "deal"),
     models: new Set(store.get("models", [])),
     saved: new Set(store.get("saved", [])),
     hidden: new Set(store.get("hidden", [])),
@@ -326,6 +326,8 @@ th { font-weight: 600; color: var(--ink); }
     }).join("") + (state.models.size ? `<button class="linkbtn" id="clearModels">All models</button>` : "");
   }
 
+  const DEAL_ORDER = { great: 0, good: 1, fair: 2, high: 3, suspect: 4 };
+  const dealRank = (i) => DEAL_ORDER[i.deal?.label] ?? 5;
   const sorters = {
     drive: (a, b) => (a.driveMi ?? 9999) - (b.driveMi ?? 9999),
     price: (a, b) => a.price - b.price,
@@ -333,7 +335,8 @@ th { font-weight: 600; color: var(--ink); }
     year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
     cargo: (a, b) => (b.cargo?.max ?? 0) - (a.cargo?.max ?? 0),
     seen: (a, b) => b.firstSeen.localeCompare(a.firstSeen),
-    deal: (a, b) => (b.deal?.pct ?? (b.deal?.label === "great" ? 20 : b.deal?.label === "good" ? 8 : -99)) - (a.deal?.pct ?? (a.deal?.label === "great" ? 20 : a.deal?.label === "good" ? 8 : -99)),
+    // Great, then good, fair, high; within a label, biggest discount first. Suspect and unrated go last.
+    deal: (a, b) => dealRank(a) - dealRank(b) || (b.deal?.pct ?? -999) - (a.deal?.pct ?? -999) || a.price - b.price,
   };
 
   function card(i) {
@@ -414,7 +417,7 @@ th { font-weight: 600; color: var(--ink); }
   document.addEventListener("click", (e) => {
     const t = e.target.closest("button");
     if (!t) return;
-    if (t.dataset.view) { state.view = t.dataset.view; store.set("view", state.view); }
+    if (t.dataset.view) { state.view = t.dataset.view; store.set("view2", state.view); }
     else if (t.dataset.model) { state.models.has(t.dataset.model) ? state.models.delete(t.dataset.model) : state.models.add(t.dataset.model); store.set("models", [...state.models]); }
     else if (t.id === "clearModels") { state.models.clear(); store.set("models", []); }
     else if (t.dataset.save) { const k = t.dataset.save; state.saved.has(k) ? state.saved.delete(k) : state.saved.add(k); store.set("saved", [...state.saved]); }
@@ -428,7 +431,7 @@ th { font-weight: 600; color: var(--ink); }
   for (const k of FILTERS) {
     $("f-" + k).addEventListener(k === "q" ? "input" : "change", (e) => { state.f[k] = e.target.value; store.set("filters", state.f); render(); });
   }
-  $("sort").addEventListener("change", (e) => { state.sort = e.target.value; store.set("sort", state.sort); render(); });
+  $("sort").addEventListener("change", (e) => { state.sort = e.target.value; store.set("sort2", state.sort); render(); });
   render();
 })();
 </script>
