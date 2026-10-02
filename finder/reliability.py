@@ -23,7 +23,7 @@ SALES = {
     "rx": 100_000, "gx": 25_000, "mdx": 55_000, "rdx": 45_000,
 }
 # NHTSA files complaints under one name per variant; the RX uses the RX 350, its main version.
-NHTSA_NAMES = {"crv": "CR-V", "priusv": "PRIUS V", "4runner": "4RUNNER", "rx": "RX 350", "gx": "GX 460"}
+NHTSA_NAMES = {"crv": "CR-V", "priusv": "PRIUS V", "4runner": "4RUNNER", "rx": "RX350", "gx": "GX460"}
 
 # Common problems reported for each generation (first year, last year, note).
 KNOWN_ISSUES = {
