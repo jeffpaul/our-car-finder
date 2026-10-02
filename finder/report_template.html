@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Minivan Finder</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,6 +45,10 @@
   --new: #86b4ff; --bad: #ff8b80; color-scheme: dark;
 }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font-body); }
 .wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; }
 header { display: grid; gap: 10px; margin-bottom: 18px; }
@@ -164,6 +173,8 @@ th { font-weight: 600; color: var(--ink); }
 @media (max-width: 480px) { .price { font-size: 23px; } .head h2 { font-size: 21px; } }
 @media (prefers-reduced-motion: no-preference) { .card { transition: border-color .15s; } .card:hover { border-color: var(--muted); } }
 </style>
+</head>
+<body>
 
 <div class="wrap">
   <header>
@@ -421,3 +432,5 @@ th { font-weight: 600; color: var(--ink); }
   render();
 })();
 </script>
+</body>
+</html>
