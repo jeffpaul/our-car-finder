@@ -311,6 +311,21 @@ FB_DESC_MILES_RE = re.compile(r"\b(\d{2,3}(?:,\d{3})|\d{2,3}\s?[kK])\s*(?:miles|
 FB_VIN_RE = re.compile(r"VIN:\s*([A-HJ-NPR-Z0-9]{17})")
 
 
+FB_END_MARKERS = ("Location is approximate", "Today's picks", "See more on Facebook", "Seller information")
+
+
+def fb_listing_text(text):
+    """Keeps only the listing's own details and description from a Facebook page's text.
+
+    The rest of the page is Facebook's feed of unrelated items, which must not be matched."""
+    start = text.find("About this vehicle")
+    if start < 0:
+        start = text.find("Listed ")
+    body = text[max(start, 0):]
+    ends = [i for i in (body.find(m) for m in FB_END_MARKERS) if i > 0]
+    return body[:min(ends)] if ends else body[:2500]
+
+
 def facebook_details(browser, ids, limit=300):
     """Opens Facebook listing pages to get mileage, VIN and title status.
 
@@ -322,11 +337,16 @@ def facebook_details(browser, ids, limit=300):
             try:
                 pg.goto(f"https://www.facebook.com/marketplace/item/{fid}/", timeout=45000)
                 pg.wait_for_timeout(2500)
+                try:  # expand a truncated seller description
+                    pg.get_by_text("See more", exact=True).first.click(timeout=1500)
+                    pg.wait_for_timeout(500)
+                except Exception:
+                    pass
                 text = pg.inner_text("body")
             except Exception:
                 continue
-            start = text.find("Listed ")
-            body = text[start:start + 4000] if start >= 0 else text[:4000]
+            listed = text.find("Listed ")
+            body = (text[listed:text.find("About this vehicle")] if listed >= 0 else "") + fb_listing_text(text)
             miles = None
             m = FB_DRIVEN_RE.search(body)
             if m:
@@ -339,7 +359,7 @@ def facebook_details(browser, ids, limit=300):
             ts = re.search(r"\b(Clean|Rebuilt|Salvage|Lien) title\b", body, re.I)
             vin = FB_VIN_RE.search(body)
             out[fid] = {"mileage": miles, "vin": vin.group(1) if vin else None,
-                        "title_status": ts.group(1).lower() if ts else None, "text": body[:1500]}
+                        "title_status": ts.group(1).lower() if ts else None, "text": body[:3000]}
     finally:
         pg.close()
     return out

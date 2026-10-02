@@ -37,6 +37,12 @@ from finder.report import build_report
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 THUMBS = DATA / "thumbs"
+# Phrases that mean a private buyer can't title and register the car. These listings are dropped.
+EXCLUDE_PATTERNS = re.compile(
+    r"\b(?:only\s+for|for)\s+export\b|\bexport\s+only\b|\bdealers?\s+only\b|\bdealer\s+sales?\b"
+    r"|\bno\s+title\b|\bwithout\s+(?:a\s+)?title\b|\bbill\s+of\s+sale\s+only\b|\bparts\s+only\b"
+    r"|\b(?:lost|missing)\s+title\b|\bmexican\s+(?:title|plates)\b", re.I)
+
 # Phrases in a listing's title or description that mean "look closer before calling it a deal".
 TROUBLE_PATTERNS = [
     (r"\b(salvage|rebuilt|branded|lien|bonded)\s+title\b", "{0}"),
@@ -85,7 +91,7 @@ def enrich_facebook(cfg, models, db, browser, rows):
         if d:
             r["mileage"] = r["mileage"] or d["mileage"]
             r["vin"] = r["vin"] or d["vin"]
-            r["extra_text"] = d.get("text") or ""
+            r["extra_text"] = S.fb_listing_text(d.get("text") or "")
             if d.get("title_status") and d["title_status"] != "clean":
                 r["extra_text"] += f' {d["title_status"]} title'
 
@@ -152,6 +158,8 @@ def normalize(raw, cfg, models, geo):
     s = cfg["search"]
     mdl = M.identify(raw["title"], models)
     if not mdl:
+        return None
+    if EXCLUDE_PATTERNS.search((raw["title"] or "") + " " + (raw.get("extra_text") or "")):
         return None
     year, price, miles = raw["year"], raw["price"], raw["mileage"]
     if year and (year < s["min_year"] or year > dt.date.today().year + 1):
