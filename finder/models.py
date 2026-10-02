@@ -61,6 +61,16 @@ MODELS = [
           r"\bprius\s?-?v\b", [(2012, 2017, 67.3, 34.3, None)]),
     Model("element", "Honda", "Element", "Boxy SUV", "4", "honda-element", "honda/element", "honda/element",
           r"\belement\b", [(2003, 2011, 74.6, 25.1, None)]),
+    Model("rx", "Lexus", "RX", "Luxury midsize SUV", "5", ("lexus-rx_350", "lexus-rx_450h"),
+          ("lexus/rx-350", "lexus/rx-450h"), ("lexus/rx-350", "lexus/rx-450h"),
+          r"\brx\s?-?(?:350|450h?)\b|\blexus\s+rx\b",
+          [(2010, 2015, 80.3, 40.0, None), (2016, 2022, 56.3, 18.4, None)]),
+    Model("gx", "Lexus", "GX 460", "Luxury 3-row SUV", "7–8", "lexus-gx_460", "lexus/gx-460", "lexus/gx-460",
+          r"\bgx\s?-?460\b|\blexus\s+gx\b", [(2010, 2023, 64.7, 46.7, 11.6)]),
+    Model("mdx", "Acura", "MDX", "Luxury 3-row SUV", "7", "acura-mdx", "acura/mdx", "acura/mdx",
+          r"\bmdx\b", [(2007, 2013, 83.5, 42.9, 15.0), (2014, 2020, 90.9, 43.4, 15.8)]),
+    Model("rdx", "Acura", "RDX", "Luxury compact SUV", "5", "acura-rdx", "acura/rdx", "acura/rdx",
+          r"\brdx\b", [(2007, 2012, 60.6, 27.8, None), (2013, 2018, 61.3, 26.1, None)]),
 ]
 
 BY_KEY = {m.key: m for m in MODELS}

@@ -39,6 +39,11 @@ def blank(source, id_, **kw):
     return d
 
 
+def slugs(v):
+    """A model's site name can be one string or a tuple of several (e.g. RX 350 and RX 450h)."""
+    return (v,) if isinstance(v, str) else tuple(v)
+
+
 def http():
     return requests.Session(impersonate="chrome")
 
@@ -50,15 +55,16 @@ def carscom(cfg, models):
     out, seen = [], set()
     band = (cfg["deals"]["market_price_min"], cfg["deals"]["market_price_max"])
     for mdl in models:
-        out += _carscom_model(s, q, mdl, seen, band)
+        for slug in slugs(mdl.carscom):
+            out += _carscom_model(s, q, mdl, seen, band, slug)
     return out
 
 
-def _carscom_model(s, q, mdl, seen, market_band):
+def _carscom_model(s, q, mdl, seen, market_band, slug):
     out = []
     for page in range(1, 6):
         params = {
-            "makes[]": mdl.make.lower(), "models[]": mdl.carscom,
+            "makes[]": mdl.make.lower(), "models[]": slug,
             "maximum_distance": s["radius_miles"], "zip": s["origin_zip"], "stock_type": "used",
             # Wider than the budget: the extra listings feed the deal-scoring price model.
             "list_price_min": market_band[0], "list_price_max": market_band[1],
@@ -171,12 +177,12 @@ def carmax(cfg, models, browser):
     try:
         pg.goto("https://www.carmax.com/cars/toyota", timeout=60000)
         pg.wait_for_timeout(4000)
-        for mdl in models:
-            api = (f'/cars/api/search/run?uri=/cars/{mdl.carmax}'
+        for slug in (sl for mdl in models for sl in slugs(mdl.carmax)):
+            api = (f'/cars/api/search/run?uri=/cars/{slug}'
                    f'&skip=0&take=100&zipCode={s["origin_zip"]}&radius={s["radius_miles"]}&shipping=-1&sort=price-asc')
             status, body = pg.evaluate("async (u) => { const r = await fetch(u); return [r.status, await r.text()] }", api)
             if status != 200:
-                raise RuntimeError(f"CarMax API returned HTTP {status} for {mdl.model}")
+                raise RuntimeError(f"CarMax API returned HTTP {status} for {slug}")
             items += json.loads(body).get("items", [])
             pg.wait_for_timeout(800)
     finally:
@@ -202,13 +208,14 @@ def autotrader(cfg, models, browser):
     pg = browser.page()
     try:
         for mdl in models:
-            out += _autotrader_model(s, mdl, pg, seen)
+            for slug in slugs(mdl.autotrader):
+                out += _autotrader_model(s, mdl, pg, seen, slug)
     finally:
         pg.close()
     return out
 
 
-def _autotrader_model(s, mdl, pg, seen):
+def _autotrader_model(s, mdl, pg, seen, slug):
     out = []
     for first in (0, 25, 50, 75):
         params = {
@@ -216,7 +223,7 @@ def _autotrader_model(s, mdl, pg, seen):
             "maxPrice": s["price_max"] + s["near_miss_margin"], "maxMileage": s["max_mileage"],
             "sortBy": "derivedpriceASC", "numRecords": 25, "firstRecord": first,
         }
-        url = f"https://www.autotrader.com/cars-for-sale/used-cars/{mdl.autotrader}?{urlencode(params)}"
+        url = f"https://www.autotrader.com/cars-for-sale/used-cars/{slug}?{urlencode(params)}"
         resp = pg.goto(url, timeout=60000)
         pg.wait_for_timeout(3000)
         m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', pg.content(), re.S)

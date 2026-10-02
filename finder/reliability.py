@@ -20,8 +20,10 @@ SKIP_COMPONENTS = {"AIR BAGS", "UNKNOWN OR OTHER"}
 SALES = {
     "sienna": 120_000, "odyssey": 115_000, "highlander": 170_000, "pilot": 140_000, "4runner": 100_000,
     "rav4": 330_000, "crv": 330_000, "venza": 40_000, "priusv": 25_000, "element": 15_000,
+    "rx": 100_000, "gx": 25_000, "mdx": 55_000, "rdx": 45_000,
 }
-NHTSA_NAMES = {"crv": "CR-V", "priusv": "PRIUS V", "4runner": "4RUNNER"}
+# NHTSA files complaints under one name per variant; the RX uses the RX 350, its main version.
+NHTSA_NAMES = {"crv": "CR-V", "priusv": "PRIUS V", "4runner": "4RUNNER", "rx": "RX 350", "gx": "GX 460"}
 
 # Common problems reported for each generation (first year, last year, note).
 KNOWN_ISSUES = {
@@ -39,6 +41,13 @@ KNOWN_ISSUES = {
     "venza": [(2009, 2015, "Few widespread problems reported.")],
     "priusv": [(2012, 2017, "An aging hybrid battery is the main cost risk; the 1.8L hybrid engine can clog its EGR system and fail a head gasket at high mileage.")],
     "element": [(2003, 2011, "Few widespread problems reported.")],
+    "rx": [(2010, 2015, "Dashboards can turn sticky or crack in Texas heat; otherwise few widespread problems. Same V6 as the Highlander."),
+           (2016, 2022, "Few widespread problems reported.")],
+    "gx": [(2010, 2023, "Very few widespread problems; built on the 4Runner's frame and V8.")],
+    "mdx": [(2007, 2013, "Generally solid. The V6 timing belt is due about every 105k miles, so ask for proof it was done."),
+            (2014, 2020, "2016+ 9-speed transmission draws rough-shifting complaints. Timing belt is due about every 105k miles.")],
+    "rdx": [(2007, 2012, "The turbo 4-cylinder can need turbo work and burn oil at high mileage."),
+            (2013, 2018, "V6 cylinder deactivation is linked to oil burning and misfires; timing belt is due about every 105k miles.")],
 }
 
 LABELS = {5: "Excellent", 4: "Above average", 3: "Average", 2: "Below average", 1: "Poor"}
