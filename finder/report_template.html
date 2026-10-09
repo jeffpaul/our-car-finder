@@ -165,6 +165,7 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid
 .rel .rl { color: var(--muted); }
 .rel-body { display: grid; gap: 4px; margin-top: 6px; color: var(--muted); }
 .rel-body b { color: var(--ink); font-weight: 600; }
+.rel-body .aj { color: var(--accent); font-weight: 600; text-underline-offset: 3px; }
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .go { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; font: 600 13px var(--font-body); padding: 7px 11px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); }
 .go.alt { background: var(--accent-soft); color: var(--accent); }
@@ -242,7 +243,7 @@ th { font-weight: 600; color: var(--ink); }
     <p>Manufacturer figures in cubic feet for the generations in range. "Max" is behind the front seats with the rear seats folded or removed. The bar on each card is scaled to 160 cu ft, and the tick marks space behind the 2nd row.</p>
     <div class="tablewrap"><table id="cargoTable"></table></div>
     <h3>How reliability is rated</h3>
-    <p>Stars come from owner complaints filed with NHTSA (the federal safety agency) for each model year, per 10,000 vehicles sold, ranked against every model year in this search: the fewest complaints get 5 stars, the most get 1. Airbag complaints are left out because most follow the Takata recall rather than how a car holds up. Sales figures are rough averages, so treat the stars as a guide. The recall count is for the model year; check a specific car's VIN at nhtsa.gov/recalls for open recalls. Known-issue notes summarize commonly reported problems for each generation.</p>
+    <p>Stars come from owner complaints filed with NHTSA (the federal safety agency) for each model year, per 10,000 vehicles sold, ranked against every model year in this search: the fewest complaints get 5 stars, the most get 1. Airbag complaints are left out because most follow the Takata recall rather than how a car holds up. Sales figures are rough averages, so treat the stars as a guide. The recall count is for the model year; check a specific car's VIN at nhtsa.gov/recalls for open recalls. Known-issue notes summarize commonly reported problems for each generation. The Autojunket link opens that site's report for the model year (problem areas and mileage danger zones); its scores are its own estimates and don't affect these stars.</p>
     <h3>How deals are rated</h3>
     <p>Each run records the asking price, year and mileage of every listing of these models, including a wider $5k–$16k sample from Cars.com and all of CarMax. A price curve per model, fitted to the last 45 days, gives the expected price for a car's year and mileage. Autotrader listings use Kelley Blue Book's fair purchase price instead. <b>Great deal</b> means at least 15% under expected (or $1,500 under and 7.5% under). <b>Good deal</b> means at least 7% under (or $700 and 3.5%). More than 40% under is marked <b>Too good to be true?</b>: on Facebook especially, that is usually a down-payment ad or a scam. A listing that mentions title or mechanical trouble tops out at Good. Unusually cheap private listings can be scams, so see the car and the title before paying anything.</p>
     <p id="footer"></p>
@@ -392,7 +393,7 @@ th { font-weight: 600; color: var(--ink); }
     if (r) {
       const stars = r.stars ? `<span class="stars${r.stars <= 2 ? " low" : ""}" aria-label="${r.stars} of 5 stars">${"★".repeat(r.stars)}${"☆".repeat(5 - r.stars)}</span><span class="rl">${esc(r.label)}</span>` : `<span class="rl">Not rated</span>`;
       const facts = r.stars ? `<div><b>${r.per10k}</b> complaints per 10k sold · <b>${r.recalls}</b> recall${r.recalls === 1 ? "" : "s"} for this model year</div>${r.components?.length ? `<div>Most complaints: ${esc(r.components.join(", ").toLowerCase())}</div>` : ""}` : "";
-      rel = `<details class="rel"><summary><span class="lbl">Reliability</span>${stars}</summary><div class="rel-body">${facts}${r.issues ? `<div>${esc(r.issues)}</div>` : ""}</div></details>`;
+      rel = `<details class="rel"><summary><span class="lbl">Reliability</span>${stars}</summary><div class="rel-body">${facts}${r.issues ? `<div>${esc(r.issues)}</div>` : ""}${i.aj ? `<div><a class="aj" href="${esc(i.aj)}" target="_blank" rel="noopener">Autojunket report ↗</a></div>` : ""}</div></details>`;
     }
     const links = Object.entries(i.links).map(([src, url], n) =>
       `<a class="go${n ? " alt" : ""}" href="${esc(url)}" target="_blank" rel="noopener">${esc(src)} ↗</a>`).join("");

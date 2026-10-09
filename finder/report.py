@@ -4,6 +4,8 @@ import json
 import shutil
 from pathlib import Path
 
+from .models import autojunket_url
+
 TEMPLATE = Path(__file__).with_name("report_template.html")
 GONE_DAYS = 14
 NEW_HOURS = 24
@@ -39,6 +41,7 @@ def build_report(db, cfg, models, site_dir, thumbs_dir, now):
             "driveMin": d.get("drive_min"), "cargo": d.get("cargo"), "body": d.get("body"),
             "seats": d.get("seats"), "links": d.get("links", {}), "flags": d.get("flags", []),
             "thumb": thumb, "firstSeen": fs.date().isoformat(), "deal": d.get("deal"), "rel": d.get("reliability"),
+            "aj": autojunket_url(d["model_key"], d.get("year")),
             "isNew": gone_on is None and (now - fs).total_seconds() < NEW_HOURS * 3600,
             "gone": gone_on,
         })

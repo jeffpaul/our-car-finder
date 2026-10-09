@@ -75,6 +75,23 @@ MODELS = [
 
 BY_KEY = {m.key: m for m in MODELS}
 
+# Autojunket reliability report slugs (autojunket.com/vehicles/<year>-<slug>). Autojunket has no
+# Prius v page and only some years of a few models, so those years are listed explicitly.
+AUTOJUNKET = {
+    "sienna": "toyota-sienna", "odyssey": "honda-odyssey", "highlander": "toyota-highlander",
+    "pilot": "honda-pilot", "4runner": "toyota-4runner", "rav4": "toyota-rav4", "crv": "honda-cr-v",
+    "venza": "toyota-venza", "element": "honda-element", "rx": "lexus-rx", "gx": "lexus-gx",
+    "mdx": "acura-mdx", "rdx": "acura-rdx",
+}
+AUTOJUNKET_YEARS = {"venza": {2012}, "element": {2010}}
+
+
+def autojunket_url(key, year):
+    slug = AUTOJUNKET.get(key)
+    if not slug or not year or (key in AUTOJUNKET_YEARS and year not in AUTOJUNKET_YEARS[key]):
+        return None
+    return f"https://autojunket.com/vehicles/{year}-{slug}"
+
 
 def enabled(cfg):
     keys = cfg["search"].get("models") or list(BY_KEY)
