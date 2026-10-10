@@ -66,7 +66,7 @@ GENS = {
         drive="FWD or AWD.",
         features="5 seats (a tiny optional 3rd row on some). Side-hinged rear door with the spare tire mounted on it.",
         changes="2011: minor trim and equipment updates.",
-        check="The 2.5L is durable; listen for a rattling rear door and check the spare-tire carrier hinge.",
+        check="The 2.5L is durable; listen for a rattling rear door, check the spare-tire carrier hinge, and confirm the rear seat-belt recall (16V-096) was done.",
     ), dict(
         name="4th generation", years=(2013, 2018),
         power="2.5L 4-cylinder, 176 hp, 6-speed automatic. No V6. Hybrid (AWD) added for 2016.",
