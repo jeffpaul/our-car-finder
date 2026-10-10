@@ -38,18 +38,33 @@ ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 THUMBS = DATA / "thumbs"
 # Phrases that mean a private buyer can't title and register the car. These listings are dropped.
+# Spanish versions are included because many Texas listings are partly or fully in Spanish.
+_SOLO = r"(?:solo|s[oó]lo|nom[aá]s|[uú]nicamente)"
+_TITULO_KIND = r"(?!\s+(?:salvage|rebuilt|reconstruido|de\s+salvamento|da[ñn]ado|limpio|azul|clean))"
 EXCLUDE_PATTERNS = re.compile(
     r"\b(?:only\s+for|for)\s+export\b|\bexport\s+only\b|\bdealers?\s+only\b|\bdealer\s+sales?\b"
     r"|\bno\s+title\b|\bwithout\s+(?:a\s+)?title\b|\bbill\s+of\s+sale\s+only\b|\bparts\s+only\b"
-    r"|\b(?:lost|missing)\s+title\b|\bmexican\s+(?:title|plates)\b", re.I)
+    r"|\b(?:lost|missing)\s+title\b|\bmexican\s+(?:title|plates)\b"
+    # export / dealer-only: "solo para exportar", "para exportación", "solo dealers"
+    rf"|\b{_SOLO}\s+(?:para\s+)?export(?:ar|aci[oó]n)\b|\bpara\s+(?:la\s+)?export(?:ar|aci[oó]n)\b"
+    rf"|\b{_SOLO}\s+(?:para\s+|a\s+)?(?:dealers?|dilers?|concesionari[oa]s?|agencias?)\b"
+    # no title: "sin título", "no tengo el título", "título perdido", "solo factura"
+    rf"|\bsin\s+t[ií]tulo\b{_TITULO_KIND}|\bno\s+(?:tiene|tengo|trae|hay|cuenta\s+con)\s+(?:el\s+)?t[ií]tulo\b{_TITULO_KIND}"
+    r"|\bt[ií]tulo\s+(?:perdido|extraviado)\b|\bperd[ií]\s+el\s+t[ií]tulo\b"
+    rf"|\b{_SOLO}\s+(?:con\s+)?(?:factura|carta\s+de\s+venta)\b"
+    # parts only, Mexican plates/title
+    r"|\b(?:para|solo|s[oó]lo)\s+(?:partes|piezas|refacciones|yonke)\b"
+    r"|\bplacas\s+(?:mexicanas|de\s+m[eé]xico)\b|\bt[ií]tulo\s+(?:mexicano|de\s+m[eé]xico)\b", re.I)
 
 # Owner count. Facebook vehicle listings carry a seller-entered "1 owner" / "2 owners" / "3+ owners" line;
 # otherwise look for wording like "one owner" or "2 owners" in the title or description.
 OWNERS_LINE = re.compile(r"(?m)^\s*(1|2|3\+?)\s+owners?\s*$", re.I)
 OWNERS_TEXT = [
-    ("1", re.compile(r"\b(?:one|1|single|sole|original)[\s-]*owner\b", re.I)),
-    ("2", re.compile(r"\b(?:two|2)[\s-]*(?:previous\s+)?owners\b|\bsecond[\s-]*owner\b", re.I)),
-    ("3+", re.compile(r"\b(?:three|3|four|4)\+?[\s-]*(?:previous\s+)?owners\b", re.I)),
+    ("1", re.compile(r"\b(?:one|1|single|sole|original)[\s-]*owner\b"
+                     r"|\b(?:un\s+solo|[uú]nico|un|1|primer)\s+due[ñn]o\b", re.I)),
+    ("2", re.compile(r"\b(?:two|2)[\s-]*(?:previous\s+)?owners\b|\bsecond[\s-]*owner\b"
+                     r"|\b(?:dos|2)\s+due[ñn]os\b|\bsegundo\s+due[ñn]o\b", re.I)),
+    ("3+", re.compile(r"\b(?:three|3|four|4)\+?[\s-]*(?:previous\s+)?owners\b|\b(?:tres|3|cuatro|4)\s+due[ñn]os\b", re.I)),
 ]
 
 
@@ -72,7 +87,28 @@ TROUBLE_PATTERNS = [
     (r"\b(check engine light|cel on|not running|doesn'?t run|won'?t start|non[- ]?runner)\b", "{0}"),
     (r"\b(mechanic(?:'?s)? special|parts only)\b", "{0}"),
     (r"\b(issue reported)\s+title\b", "title {0}"),
+    # Spanish
+    (r"\bt[ií]tulo\s+(salvage|de\s+salvamento|reconstruido|rebuilt|da[ñn]ado)\b", "{0}"),
+    (r"\b(salvamento|reconstruido)\b", "{0}"),
+    (r"\b(inundad[oa]|se\s+inund[oó]|inundaci[oó]n)\b", "flood"),
+    (r"\b(granizo|granizada)\b", "hail damage"),
+    (r"\b(chasis)\s+(?:da[ñn]ado|doblado|chueco)\b", "frame damage"),
+    (r"\b(?:necesita|ocupa|requiere)\s+(?:una?\s+)?(?:nuev[oa]\s+)?(transmisi[oó]n|motor|trabajo|reparaci[oó]n|compostura)\b", "needs {0}"),
+    (r"\b(transmisi[oó]n|motor|caja)\s+(?:falla|fallando|patina|se\s+patina|brinca|tiene\s+falla|no\s+sirve|da[ñn]ad[oa])\b", "{0} trouble"),
+    (r"\b(?:falla|problema)s?\s+(?:de|en)\s+(?:la\s+|el\s+)?(transmisi[oó]n|motor)\b", "{0} trouble"),
+    # "no prende ninguna luz" means no warning lights, so "no prende" followed by a light doesn't count.
+    (r"\b(no\s+prende(?!\s+(?:ninguna|ning[uú]n|la\s+luz|luz|el\s+check|check))|no\s+arranca|no\s+camina|no\s+corre|desvielado)\b", "not running"),
+    (r"\b(?:check\s+engine|luz\s+de(?:l)?\s+motor)\s+(prendid[ao]|encendid[ao]|se\s+prende)\b", "check engine light"),
+    (r"\b(para\s+mec[aá]nico|para\s+arreglar|para\s+reparar)\b", "mechanic's special"),
+    (r"\b(aire|a/?c)\s+no\s+(?:enfr[ií]a|sirve|funciona|jala)\b", "a/c trouble"),
 ]
+# Spanish words in flag labels, shown in English on the report.
+FLAG_WORDS = {"transmisión": "transmission", "transmision": "transmission", "caja": "transmission", "motor": "engine",
+              "trabajo": "work", "reparación": "repairs", "reparacion": "repairs", "compostura": "repairs",
+              "salvamento": "salvage", "de salvamento": "salvage", "reconstruido": "rebuilt",
+              "dañado": "damaged", "danado": "damaged"}
+# "no salvage", "never flooded", "sin granizo", "nunca inundado": a negation just before the match cancels it.
+NEGATED = re.compile(r"\b(?:no|not|never|sin|nunca|ni|zero)\b[^.,;!\n]{0,18}\Z")
 
 log = logging.getLogger("finder")
 
@@ -199,7 +235,9 @@ def trouble_flags(text, flags=()):
     flags = list(flags)
     for pat, label in TROUBLE_PATTERNS:
         for m in re.finditer(pat, text.lower()):
-            f = label.format(m.group(1))
+            if NEGATED.search(text.lower()[max(0, m.start() - 30):m.start()]):
+                continue
+            f = label.format(FLAG_WORDS.get(m.group(1), m.group(1)))
             if f not in flags:
                 flags.append(f)
     return flags
