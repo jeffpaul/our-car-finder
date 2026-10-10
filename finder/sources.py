@@ -3,8 +3,8 @@
 source, id, url, title, year, trim, price, mileage, vin, seller, private,
 city, lat, lon, zip, image_url
 
-Cars.com and Craigslist work with plain HTTP (Chrome TLS impersonation).
-CarMax, Autotrader and Facebook need a real browser; Camoufox (stealth Firefox)
+Cars.com, Craigslist and Autotrader (with KBB as a fallback) work with plain HTTP
+(Chrome/Safari TLS impersonation). CarMax and Facebook need a real browser; Camoufox (stealth Firefox)
 gets past their bot checks where headless Chromium does not.
 """
 import html as htmlmod
@@ -241,20 +241,58 @@ def carmax(cfg, models, browser):
     return out
 
 
-def autotrader(cfg, models, browser):
+# Autotrader's bot check blocks some clients some days (it blocked the stealth browser for most of
+# Oct 4–8 while plain requests got through). Kelley Blue Book is the same company and serves the
+# same listings in the same page format, so each page is tried on these in order, starting with
+# whichever worked last.
+AUTOTRADER_HOSTS = [
+    ("autotrader", "chrome", "https://www.autotrader.com/cars-for-sale/used-cars/{slug}?{q}"),
+    ("autotrader", "safari", "https://www.autotrader.com/cars-for-sale/used-cars/{slug}?{q}"),
+    ("kbb", "chrome", "https://www.kbb.com/cars-for-sale/used/{slug}?{q}"),
+    ("kbb", "safari", "https://www.kbb.com/cars-for-sale/used/{slug}?{q}"),
+]
+
+
+class _AutotraderClient:
+    def __init__(self):
+        self.order = list(range(len(AUTOTRADER_HOSTS)))
+        self.sessions = {}
+
+    def eggs(self, slug, params):
+        """Returns the page's __eggsState listing data from the first host that serves it."""
+        errors = []
+        for i in list(self.order):
+            site, imp, tmpl = AUTOTRADER_HOSTS[i]
+            q = self.sessions.setdefault(imp, requests.Session(impersonate=imp))
+            try:
+                r = q.get(tmpl.format(slug=slug, q=urlencode(params)), timeout=40)
+                m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+                if m:
+                    eggs = json.loads(m.group(1))["props"]["pageProps"]["__eggsState"]
+                    if self.order[0] != i:
+                        log.info("autotrader: switching to %s (%s)", site, imp)
+                        self.order.remove(i)
+                        self.order.insert(0, i)
+                    return eggs
+                t = re.search(r"<title>(.*?)</title>", r.text, re.S)
+                errors.append(f"{site}/{imp}: HTTP {r.status_code} {t.group(1).strip()[:40] if t else ''}")
+            except Exception as e:
+                errors.append(f"{site}/{imp}: {e}"[:80])
+            time.sleep(2)
+        raise RuntimeError("Autotrader and KBB both blocked: " + "; ".join(errors))
+
+
+def autotrader(cfg, models):
     s = cfg["search"]
-    out, seen = [], set()
-    pg = browser.page()
-    try:
-        for mdl in models:
-            for slug in slugs(mdl.autotrader):
-                out += _autotrader_model(s, mdl, pg, seen, slug)
-    finally:
-        pg.close()
+    out, seen, client = [], set(), _AutotraderClient()
+    for mdl in models:
+        for slug in slugs(mdl.autotrader):
+            out += _autotrader_model(s, mdl, client, seen, slug)
+            time.sleep(1)
     return out
 
 
-def _autotrader_model(s, mdl, pg, seen, slug):
+def _autotrader_model(s, mdl, client, seen, slug):
     out = []
     for first in (0, 25, 50, 75):
         params = {
@@ -262,13 +300,7 @@ def _autotrader_model(s, mdl, pg, seen, slug):
             "maxPrice": s["price_max"] + s["near_miss_margin"], "maxMileage": s["max_mileage"],
             "sortBy": "derivedpriceASC", "numRecords": 25, "firstRecord": first,
         }
-        url = f"https://www.autotrader.com/cars-for-sale/used-cars/{slug}?{urlencode(params)}"
-        resp = pg.goto(url, timeout=60000)
-        pg.wait_for_timeout(3000)
-        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', pg.content(), re.S)
-        if not m:
-            raise RuntimeError(f"Autotrader page had no data (HTTP {resp.status if resp else '?'}, title {pg.title()!r})")
-        eggs = json.loads(m.group(1))["props"]["pageProps"]["__eggsState"]
+        eggs = client.eggs(slug, params)
         owners = eggs.get("owners", {})
         new = 0
         for lid, it in eggs.get("inventory", {}).items():
@@ -348,8 +380,8 @@ def facebook(cfg, models, browser):
     return out
 
 
-HTTP_SOURCES = {"carscom": carscom, "craigslist": craigslist}
-BROWSER_SOURCES = {"carmax": carmax, "autotrader": autotrader, "facebook": facebook}
+HTTP_SOURCES = {"carscom": carscom, "craigslist": craigslist, "autotrader": autotrader}
+BROWSER_SOURCES = {"carmax": carmax, "facebook": facebook}
 
 
 FB_DRIVEN_RE = re.compile(r"Driven ([\d,]+) miles")

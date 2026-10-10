@@ -8,9 +8,9 @@ report page is published to GitHub Pages.
 
 | Site | How | Notes |
 | --- | --- | --- |
-| Cars.com | HTTP with Chrome TLS fingerprint | Covers most local dealer inventory. Out-of-area "ships to you" cars are dropped by distance. |
+| Cars.com | HTTP with Chrome TLS fingerprint | Covers most local dealer inventory. Out-of-area "ships to you" cars are dropped by distance. Each in-range listing page is opened once (with the search page as Referer, which it requires) for AutoCheck owners, accidents and title. |
 | Craigslist | Craigslist's JSON search API | All TX areas within the radius (Austin, San Antonio, Houston, Dallas, Killeen, …). |
-| Autotrader | Camoufox (stealth headless Firefox) | Dealer coordinates come with the listing. |
+| Autotrader | HTTP with Chrome or Safari TLS fingerprint, falling back to KBB.com (same listings, same page format) | Dealer coordinates and KBB fair price come with the listing. |
 | CarMax | Camoufox, then CarMax's search API from inside the page | CarMax rarely has anything under $10k. |
 | Facebook Marketplace | Camoufox, logged out | First page of results per city and model only. Mileage, VIN and title status come from opening each new listing once. |
 
