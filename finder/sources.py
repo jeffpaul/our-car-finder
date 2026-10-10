@@ -198,6 +198,7 @@ def carmax(cfg, models, browser):
             seller=f'CarMax {c.get("storeName") or ""}'.strip(),
             city=f'{c.get("storeCity")}, {c.get("stateAbbreviation")}' if c.get("storeCity") else None,
             image_url=f"https://img2.carmax.com/assets/{stock}/hero.jpg?width=640&height=480",
+            owners="1" if "singleOwner" in (c.get("highlights") or []) else None,
         ))
     return out
 

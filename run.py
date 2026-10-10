@@ -43,6 +43,26 @@ EXCLUDE_PATTERNS = re.compile(
     r"|\bno\s+title\b|\bwithout\s+(?:a\s+)?title\b|\bbill\s+of\s+sale\s+only\b|\bparts\s+only\b"
     r"|\b(?:lost|missing)\s+title\b|\bmexican\s+(?:title|plates)\b", re.I)
 
+# Owner count. Facebook vehicle listings carry a seller-entered "1 owner" / "2 owners" / "3+ owners" line;
+# otherwise look for wording like "one owner" or "2 owners" in the title or description.
+OWNERS_LINE = re.compile(r"(?m)^\s*(1|2|3\+?)\s+owners?\s*$", re.I)
+OWNERS_TEXT = [
+    ("1", re.compile(r"\b(?:one|1|single|sole|original)[\s-]*owner\b", re.I)),
+    ("2", re.compile(r"\b(?:two|2)[\s-]*(?:previous\s+)?owners\b|\bsecond[\s-]*owner\b", re.I)),
+    ("3+", re.compile(r"\b(?:three|3|four|4)\+?[\s-]*(?:previous\s+)?owners\b", re.I)),
+]
+
+
+def owners_from_text(text):
+    m = OWNERS_LINE.search(text or "")
+    if m:
+        return "3+" if m.group(1).startswith("3") else m.group(1)
+    for n, pat in OWNERS_TEXT:
+        if pat.search(text or ""):
+            return n
+    return None
+
+
 # Phrases in a listing's title or description that mean "look closer before calling it a deal".
 TROUBLE_PATTERNS = [
     (r"\b(salvage|rebuilt|branded|lien|bonded)\s+title\b", "{0}"),
@@ -205,6 +225,7 @@ def normalize(raw, cfg, models, geo):
         "drive_min": round(drive_min) if drive_min else None,
         "image_url": raw["image_url"], "links": {raw["source"]: raw["url"]},
         "flags": flags, "kbb": raw.get("kbb"), "deal_indicator": raw.get("deal_indicator"),
+        "owners": raw.get("owners") or owners_from_text((raw["title"] or "") + "\n" + (raw.get("extra_text") or "")),
     }
 
 

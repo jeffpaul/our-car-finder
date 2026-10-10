@@ -41,7 +41,7 @@ def build_report(db, cfg, models, site_dir, thumbs_dir, now):
             "driveMin": d.get("drive_min"), "cargo": d.get("cargo"), "body": d.get("body"),
             "seats": d.get("seats"), "links": d.get("links", {}), "flags": d.get("flags", []),
             "thumb": thumb, "firstSeen": fs.date().isoformat(), "deal": d.get("deal"), "rel": d.get("reliability"),
-            "aj": autojunket_url(d["model_key"], d.get("year")),
+            "aj": autojunket_url(d["model_key"], d.get("year")), "owners": d.get("owners"),
             "isNew": gone_on is None and (now - fs).total_seconds() < NEW_HOURS * 3600,
             "gone": gone_on,
         })

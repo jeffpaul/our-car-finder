@@ -18,6 +18,8 @@ def describe(x):
     if x.get("drive_mi"):
         where += f' ({x["drive_mi"]} mi away)'
     bits.append(where)
+    if x.get("owners"):
+        bits.append(f'{x["owners"]} owner{"" if x["owners"] == "1" else "s"}')
     if x.get("cargo"):
         bits.append(f'cargo {x["cargo"]["max"]:.0f} cu ft')
     r = x.get("reliability") or {}
