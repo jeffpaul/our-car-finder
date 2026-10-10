@@ -71,6 +71,7 @@ TROUBLE_PATTERNS = [
     (r"\bneeds?\s+(?:a\s+)?(?:new\s+)?(transmission|engine|motor|work|repairs?|attention|tlc)\b", "needs {0}"),
     (r"\b(check engine light|cel on|not running|doesn'?t run|won'?t start|non[- ]?runner)\b", "{0}"),
     (r"\b(mechanic(?:'?s)? special|parts only)\b", "{0}"),
+    (r"\b(issue reported)\s+title\b", "title {0}"),
 ]
 
 log = logging.getLogger("finder")
@@ -87,6 +88,7 @@ def open_db():
     db.execute("CREATE TABLE IF NOT EXISTS published (path TEXT PRIMARY KEY)")
     db.execute("CREATE TABLE IF NOT EXISTS runs (at TEXT PRIMARY KEY, summary TEXT)")
     db.execute("CREATE TABLE IF NOT EXISTS fb_details (id TEXT PRIMARY KEY, data TEXT, fetched TEXT)")
+    db.execute("CREATE TABLE IF NOT EXISTS carscom_history (id TEXT PRIMARY KEY, data TEXT, fetched TEXT)")
     return db
 
 
@@ -116,6 +118,31 @@ def enrich_facebook(cfg, models, db, browser, rows):
                 r["extra_text"] += f' {d["title_status"]} title'
 
 
+def enrich_carscom(cfg, models, db, rows):
+    """Adds AutoCheck owners/accidents/title to in-range Cars.com rows, opening each listing page once."""
+    s = cfg["search"]
+    cc = [r for r in rows if r["source"] == "Cars.com"]
+    cached = {i: json.loads(d) for i, d in db.execute("SELECT id, data FROM carscom_history")}
+    todo = [(r["id"], r["ref"]) for r in cc if r["id"] not in cached and r.get("ref") and M.identify(r["title"], models)
+            and (not r["year"] or r["year"] >= s["min_year"]) and (not r["mileage"] or r["mileage"] <= s["max_mileage"])
+            and r["price"] and s["price_min"] - s["near_miss_margin"] <= r["price"] <= s["price_max"] + s["near_miss_margin"]]
+    if todo:
+        log.info("cars.com: opening %d new listing pages for vehicle history (max 60)", len(todo))
+        fetched = S.carscom_history(todo)
+        now = dt.datetime.now().isoformat()
+        db.executemany("INSERT OR REPLACE INTO carscom_history VALUES (?,?,?)",
+                       [(i, json.dumps(d), now) for i, d in fetched.items()])
+        db.commit()
+        cached.update(fetched)
+    for r in cc:
+        d = cached.get(r["id"]) or {}
+        r.update({k: d[k] for k in ("owners", "accidents", "title_status") if k in d})
+        if d:
+            r["history_source"] = "AutoCheck"
+        if d.get("title_status") and d["title_status"].lower() != "clean":
+            r["extra_text"] = (r.get("extra_text") or "") + f' {d["title_status"].lower()} title'
+
+
 def scrape(cfg, models, only, db):
     """Runs every enabled source. Returns (raw listings, {source: error or None})."""
     enabled = {k for k, v in cfg["sources"].items() if v is True}
@@ -137,6 +164,11 @@ def scrape(cfg, models, only, db):
     for name, fn in S.HTTP_SOURCES.items():
         if name in enabled:
             run_one(name, fn)
+    if status.get("carscom", "skipped") is None:
+        try:
+            enrich_carscom(cfg, models, db, results)
+        except Exception as e:
+            log.error("cars.com history failed: %s", e)
     browser_names = [n for n in S.BROWSER_SOURCES if n in enabled]
     if browser_names:
         try:
@@ -225,6 +257,8 @@ def normalize(raw, cfg, models, geo):
         "drive_min": round(drive_min) if drive_min else None,
         "image_url": raw["image_url"], "links": {raw["source"]: raw["url"]},
         "flags": flags, "kbb": raw.get("kbb"), "deal_indicator": raw.get("deal_indicator"),
+        "accidents": raw.get("accidents"), "title_status": raw.get("title_status"),
+        "history_source": raw.get("history_source"),
         "owners": raw.get("owners") or owners_from_text((raw["title"] or "") + "\n" + (raw.get("extra_text") or "")),
     }
 
@@ -255,6 +289,9 @@ def merge(old, new):
     history = old.get("price_history") or [[old.get("first_seen_date"), old["price"]]]
     merged = {**old, **{k: v for k, v in new.items() if v not in (None, "", [])}}
     merged["links"] = links
+    if old.get("history_source") and not new.get("history_source"):
+        for f in ("owners", "accidents", "title_status", "history_source"):
+            merged[f] = old.get(f)
     if new["price"] != old["price"]:
         history.append([dt.date.today().isoformat(), new["price"]])
     merged["price_history"] = history

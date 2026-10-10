@@ -42,6 +42,7 @@ def build_report(db, cfg, models, site_dir, thumbs_dir, now):
             "seats": d.get("seats"), "links": d.get("links", {}), "flags": d.get("flags", []),
             "thumb": thumb, "firstSeen": fs.date().isoformat(), "deal": d.get("deal"), "rel": d.get("reliability"),
             "aj": autojunket_url(d["model_key"], d.get("year")), "owners": d.get("owners"),
+            "accidents": d.get("accidents"), "titleStatus": d.get("title_status"), "history": d.get("history_source"),
             "isNew": gone_on is None and (now - fs).total_seconds() < NEW_HOURS * 3600,
             "gone": gone_on,
         })

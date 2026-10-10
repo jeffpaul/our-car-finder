@@ -20,6 +20,9 @@ def describe(x):
     bits.append(where)
     if x.get("owners"):
         bits.append(f'{x["owners"]} owner{"" if x["owners"] == "1" else "s"}')
+    if x.get("accidents") is not None:
+        bits.append("no accidents" if x["accidents"] == 0 else "accident reported" if x["accidents"] == "reported"
+                    else f'{x["accidents"]} accident{"" if x["accidents"] == 1 else "s"}')
     if x.get("cargo"):
         bits.append(f'cargo {x["cargo"]["max"]:.0f} cu ft')
     r = x.get("reliability") or {}

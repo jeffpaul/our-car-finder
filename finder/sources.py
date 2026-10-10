@@ -9,11 +9,14 @@ gets past their bot checks where headless Chromium does not.
 """
 import html as htmlmod
 import json
+import logging
 import re
+import time
 from urllib.parse import quote, urlencode
 
 from curl_cffi import requests
 
+log = logging.getLogger("finder")
 YEAR_RE = re.compile(r"\b(199\d|20[0-3]\d)\b")
 
 
@@ -90,10 +93,45 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
                 mileage=to_int(d.get("mileage")), vin=d.get("vin"),
                 seller=seller.get("dealerName") or "Private seller",
                 private=not seller.get("dealerName"), zip=seller.get("zip"),
-                image_url=d.get("primaryThumbnail"),
+                image_url=d.get("primaryThumbnail"), ref=r.url,
             ))
         if new == 0 or len(blobs) < 20:
             break
+    return out
+
+
+def carscom_history(todo, limit=60, delay=1.5):
+    """Reads the AutoCheck history box (owners, accidents, title) from Cars.com listing pages.
+
+    todo is [(listing id, search page URL)]. Listing pages only load with a search page as the
+    Referer. Stops at the first block so the search scraper isn't put at risk. Returns {id: data};
+    data is {} for listings without a history box.
+    """
+    q, out = http(), {}
+    for n, (lid, ref) in enumerate(todo[:limit]):
+        if n:
+            time.sleep(delay)
+        try:
+            r = q.get(f"https://www.cars.com/vehicledetail/{lid}/", headers={"Referer": ref}, timeout=40)
+        except Exception as e:
+            log.warning("cars.com history: %s failed: %s", lid, e)
+            continue
+        if r.status_code != 200:
+            log.warning("cars.com history: HTTP %s after %d pages, stopping", r.status_code, n)
+            break
+        stats = {k.strip().lower(): re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", htmlmod.unescape(v))).strip()
+                 for k, v in re.findall(r'<dt class="stat__label">(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>', r.text, re.S)}
+        d = {}
+        if stats.get("owner"):
+            d["owners"] = "1" if stats["owner"] == "1" else "2+"
+        acc = stats.get("accidents", "")
+        if acc.isdigit():
+            d["accidents"] = int(acc)
+        elif acc:
+            d["accidents"] = "reported"  # AutoCheck shows "Reported" without a count
+        if stats.get("title"):
+            d["title_status"] = stats["title"]
+        out[lid] = d
     return out
 
 
