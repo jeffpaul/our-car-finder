@@ -2,8 +2,8 @@
 
 [search]
 # Vehicles to search for. Keys and cargo specs live in finder/models.py:
-# sienna, odyssey, highlander, pilot, 4runner, rav4, crv, venza, priusv, element, rx, gx, mdx, rdx
-models = ["sienna", "odyssey", "highlander", "pilot", "4runner", "rav4", "crv", "venza", "priusv", "element",
+# sienna, odyssey, highlander, pilot, 4runner, rav4, crv, venza, priusv, prius, element, rx, gx, mdx, rdx
+models = ["sienna", "odyssey", "highlander", "pilot", "4runner", "rav4", "crv", "venza", "priusv", "prius", "element",
           "rx", "gx", "mdx", "rdx"]
 origin_name = "McNeil Dr & US-183, Austin"
 origin_lat = 30.4380

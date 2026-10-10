@@ -59,6 +59,9 @@ MODELS = [
           r"\bvenza\b", [(2009, 2015, 70.1, 30.7, None)]),
     Model("priusv", "Toyota", "Prius v", "Wagon", "5", "toyota-prius_v", "toyota/prius-v", "toyota/prius-v",
           r"\bprius\s?-?v\b", [(2012, 2017, 67.3, 34.3, None)]),
+    Model("prius", "Toyota", "Prius", "Hatchback", "5", "toyota-prius", "toyota/prius", "toyota/prius",
+          r"\bprius\b(?!\s?-?(?:v|c|prime|plug-?in)\b)",
+          [(2010, 2015, 39.6, 21.6, None), (2016, 2022, 65.5, 24.6, None)]),
     Model("element", "Honda", "Element", "Boxy SUV", "4", "honda-element", "honda/element", "honda/element",
           r"\belement\b", [(2003, 2011, 74.6, 25.1, None)]),
     Model("rx", "Lexus", "RX", "Luxury midsize SUV", "5", ("lexus-rx_350", "lexus-rx_450h"),
@@ -80,7 +83,7 @@ BY_KEY = {m.key: m for m in MODELS}
 AUTOJUNKET = {
     "sienna": "toyota-sienna", "odyssey": "honda-odyssey", "highlander": "toyota-highlander",
     "pilot": "honda-pilot", "4runner": "toyota-4runner", "rav4": "toyota-rav4", "crv": "honda-cr-v",
-    "venza": "toyota-venza", "element": "honda-element", "rx": "lexus-rx", "gx": "lexus-gx",
+    "venza": "toyota-venza", "prius": "toyota-prius", "element": "honda-element", "rx": "lexus-rx", "gx": "lexus-gx",
     "mdx": "acura-mdx", "rdx": "acura-rdx",
 }
 AUTOJUNKET_YEARS = {"venza": {2012}, "element": {2010}}

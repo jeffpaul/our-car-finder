@@ -19,7 +19,7 @@ SKIP_COMPONENTS = {"AIR BAGS", "UNKNOWN OR OTHER"}
 # Approximate average US sales per year over 2011–2020, used to normalize complaint counts.
 SALES = {
     "sienna": 120_000, "odyssey": 115_000, "highlander": 170_000, "pilot": 140_000, "4runner": 100_000,
-    "rav4": 330_000, "crv": 330_000, "venza": 40_000, "priusv": 25_000, "element": 15_000,
+    "rav4": 330_000, "crv": 330_000, "venza": 40_000, "priusv": 25_000, "prius": 140_000, "element": 15_000,
     "rx": 100_000, "gx": 25_000, "mdx": 55_000, "rdx": 45_000,
 }
 # NHTSA files complaints under one name per variant; the RX uses the RX 350, its main version.
@@ -40,6 +40,8 @@ KNOWN_ISSUES = {
             (2017, 2022, "The 1.5L turbo can dilute oil with fuel (mostly in cold climates); A/C condenser leaks.")],
     "venza": [(2009, 2015, "Few widespread problems reported.")],
     "priusv": [(2012, 2017, "An aging hybrid battery is the main cost risk; the 1.8L hybrid engine can clog its EGR system and fail a head gasket at high mileage.")],
+    "prius": [(2010, 2015, "An aging hybrid battery is the main cost risk; the 1.8L engine can clog its EGR system and fail a head gasket at high mileage."),
+              (2016, 2022, "Few widespread problems reported for this generation.")],
     "element": [(2003, 2011, "Few widespread problems reported.")],
     "rx": [(2010, 2015, "Dashboards can turn sticky or crack in Texas heat; otherwise few widespread problems. Same V6 as the Highlander."),
            (2016, 2022, "Few widespread problems reported.")],
