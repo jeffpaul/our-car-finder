@@ -36,6 +36,7 @@ server = "https://ntfy.sh"
 # Anyone who knows the topic name can read it, so set it in config.local.toml
 # (not committed), e.g.  [ntfy]  topic = "carfinder-<random>"
 topic = ""
+# Errors (failing sites, crashed runs, failed publishes) go to ops_topic if set, also in config.local.toml.
 notify_near_misses = true
 # Warn when a source has failed this many runs in a row.
 source_failure_alert_after = 3

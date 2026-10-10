@@ -416,6 +416,8 @@ def main():
             if srcs and srcs <= ok_sources:
                 db.execute("UPDATE listings SET gone_on=? WHERE key=?", (today, key))
 
+        recovered = [n for n, in db.execute("SELECT source FROM source_health WHERE alerted=1")
+                     if status.get(n, "skipped") is None]
         for name, err in status.items():
             if err is None:
                 db.execute("""INSERT INTO source_health (source, failures, last_ok, last_error, last_count, alerted)
@@ -443,15 +445,23 @@ def main():
             notifier.source_failures(failing)
             db.executemany("UPDATE source_health SET alerted=1 WHERE source=?", [(f[0],) for f in failing])
             db.commit()
+        if recovered:
+            notifier.source_recovered(recovered)
 
     rescore(db, rel)
     site = build_report(db, cfg, models, ROOT / "out" / "site", THUMBS, now)
     log.info("report written to %s", site)
 
     if not args.no_publish and cfg.get("publish", {}).get("repo"):
-        publish(cfg, ROOT, site)
+        if not publish(cfg, ROOT, site):
+            notifier.ops("Car report didn't publish", "The git push to GitHub Pages failed; see today's log in logs/.")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as e:
+        log.exception("run crashed")
+        Notifier(load_config()).ops("Car finder run crashed", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()[-1000:]}", priority=5)
+        raise

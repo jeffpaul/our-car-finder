@@ -52,11 +52,13 @@ class Notifier:
     def __init__(self, cfg, enabled=True):
         n = cfg["ntfy"]
         self.url = f'{n["server"].rstrip("/")}/{n["topic"]}'
+        # Errors and health alerts go to the maintainer's topic; car alerts to the main one.
+        self.ops_url = f'{n["server"].rstrip("/")}/{n["ops_topic"]}' if n.get("ops_topic") else self.url
         self.report_url = cfg.get("publish", {}).get("page_url") or None
         self.enabled = enabled and bool(n.get("topic"))
         self.http = requests.Session()
 
-    def send(self, title, body, click=None, tags=None, attach=None, priority=None, report_button=True):
+    def send(self, title, body, click=None, tags=None, attach=None, priority=None, report_button=True, ops=False):
         if not self.enabled:
             log.info("[notify disabled] %s | %s", title, body.replace("\n", " | "))
             return
@@ -73,7 +75,7 @@ class Notifier:
         if report_button and self.report_url:
             headers["Actions"] = f"view, Open report, {self.report_url}"
         try:
-            r = self.http.post(self.url, data=body.encode("utf-8"), headers=headers, timeout=20)
+            r = self.http.post(self.ops_url if ops else self.url, data=body.encode("utf-8"), headers=headers, timeout=20)
             r.raise_for_status()
         except Exception as e:
             log.error("ntfy send failed: %s", e)
@@ -116,4 +118,12 @@ class Notifier:
 
     def source_failures(self, rows):
         body = "\n".join(f"{src}: failed {n} runs in a row ({err})" for src, n, err in rows)
-        self.send("Some car sites are failing", body, tags="warning", report_button=False)
+        self.send("Some car sites are failing", body, tags="warning", report_button=False, ops=True)
+
+    def source_recovered(self, names):
+        self.send("Car sites working again", ", ".join(names) + " returned listings again.",
+                  tags="white_check_mark", report_button=False, ops=True)
+
+    def ops(self, title, body, priority=4):
+        """An error for the maintainer: crashed runs, failed publishes."""
+        self.send(title, body[:1500], tags="rotating_light", priority=priority, report_button=False, ops=True)

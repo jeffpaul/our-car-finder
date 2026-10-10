@@ -53,12 +53,18 @@ crontab -e   # add:  0 * * * * /path/to/run_daily.sh
 
 ## Notifications
 
-Install the ntfy app (iOS/Android) and subscribe to the topic in `config.toml` on server `ntfy.sh`.
-You get:
+Install the ntfy app (iOS/Android) and subscribe on server `ntfy.sh`. Both topics are set in
+`config.local.toml` (not committed; anyone who knows a topic name can read it).
+
+`topic`, for whoever is car shopping:
 
 - one push per new listing (photo attached, tap opens the listing; matches are higher priority than near misses)
 - price drops of $300 or more, or drops into the budget
-- a warning when a site fails 3 runs in a row (usually means its markup or bot protection changed)
+
+`ops_topic`, for whoever maintains this (falls back to `topic` if unset):
+
+- a warning when a site fails 3 runs in a row (usually means its markup or bot protection changed), and a note when it recovers
+- a crashed run (with the end of the traceback) or a failed GitHub Pages push
 
 ## Publishing
 
