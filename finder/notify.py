@@ -65,7 +65,9 @@ class Notifier:
             return
         # Headers must be ASCII; ntfy decodes RFC 2047 encoded words for anything else (·, ✓, accents).
         headers = {"Title": title if title.isascii() else f"=?UTF-8?B?{base64.b64encode(title.encode()).decode()}?="}
-        click = click or self.report_url  # summaries without a single listing open the report
+        if not ops:
+            click = click or self.report_url  # car summaries without a single listing open the report
+        # Ops messages have no tap action, so tapping opens them in the ntfy app to read in full.
         if click:
             headers["Click"] = click
         if tags:

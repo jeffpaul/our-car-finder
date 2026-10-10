@@ -389,6 +389,6 @@ if subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--quiet"]).retur
 url = cfg["publish"]["page_url"].rstrip("/") + "/generations/"
 n_prius = sum(1 for x in matches if x["model_key"] == "prius")
 Notifier(cfg).send("Generations guide updated",
-                   f"Rebuilt with today's matches: {len(sections)} models, including {n_prius} regular Prius listings.",
-                   click=url, tags="blue_book", report_button=False, ops=True)
+                   f"Rebuilt with today's matches: {len(sections)} models, including {n_prius} regular Prius listings.\n{url}",
+                   tags="blue_book", report_button=False, ops=True)
 print("published", url)
