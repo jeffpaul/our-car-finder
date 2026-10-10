@@ -409,12 +409,14 @@ def main():
 
         # Mark listings gone when every site that showed them was checked successfully.
         ok_sources = {name for name, err in status.items() if err is None}
+        gone = 0
         for key, data in db.execute("SELECT key, data FROM listings WHERE gone_on IS NULL").fetchall():
             if key in fresh:
                 continue
             srcs = {SOURCE_KEYS.get(s) for s in json.loads(data).get("links", {})}
             if srcs and srcs <= ok_sources:
                 db.execute("UPDATE listings SET gone_on=? WHERE key=?", (today, key))
+                gone += 1
 
         recovered = [n for n, in db.execute("SELECT source FROM source_health WHERE alerted=1")
                      if status.get(n, "skipped") is None]
@@ -452,9 +454,17 @@ def main():
     site = build_report(db, cfg, models, ROOT / "out" / "site", THUMBS, now)
     log.info("report written to %s", site)
 
+    published = None
     if not args.no_publish and cfg.get("publish", {}).get("repo"):
-        if not publish(cfg, ROOT, site):
+        published = publish(cfg, ROOT, site)
+        if not published:
             notifier.ops("Car report didn't publish", "The git push to GitHub Pages failed; see today's log in logs/.")
+    if not args.report_only:
+        counts = {}
+        for r in raw:
+            counts[SOURCE_KEYS[r["source"]]] = counts.get(SOURCE_KEYS[r["source"]], 0) + 1
+        notifier.run_summary(dt.datetime.now().astimezone() - now, status, counts, len(raw), len(fresh),
+                             len(new_items), len(drops), gone, published)
     return 0
 
 

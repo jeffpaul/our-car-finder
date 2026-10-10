@@ -1,4 +1,5 @@
 """Push notifications through ntfy (https://ntfy.sh)."""
+import base64
 import logging
 
 from curl_cffi import requests
@@ -62,7 +63,8 @@ class Notifier:
         if not self.enabled:
             log.info("[notify disabled] %s | %s", title, body.replace("\n", " | "))
             return
-        headers = {"Title": title.encode("utf-8").decode("latin-1", "ignore")}
+        # Headers must be ASCII; ntfy decodes RFC 2047 encoded words for anything else (·, ✓, accents).
+        headers = {"Title": title if title.isascii() else f"=?UTF-8?B?{base64.b64encode(title.encode()).decode()}?="}
         click = click or self.report_url  # summaries without a single listing open the report
         if click:
             headers["Click"] = click
@@ -123,6 +125,19 @@ class Notifier:
     def source_recovered(self, names):
         self.send("Car sites working again", ", ".join(names) + " returned listings again.",
                   tags="white_check_mark", report_button=False, ops=True)
+
+    def run_summary(self, took, status, counts, raw, in_range, new, drops, gone, published):
+        """A quiet end-of-run summary for the maintainer."""
+        failed = [n for n, e in status.items() if e]
+        mins = round(took.total_seconds() / 60)
+        title = f"Car finder run OK · {mins} min" if not failed else f"Car finder run · {len(failed)} site{'s' if len(failed) > 1 else ''} failed"
+        sites = "\n".join(f"{'✗' if status[n] else '✓'} {n}: " + (status[n][:120] if status[n] else f"{counts.get(n, 0)} listings")
+                          for n in sorted(status))
+        pub = {True: "Report published.", False: "Report NOT published.", None: "Publishing skipped."}[published]
+        body = (f"{raw:,} listings scanned, {in_range} in range: {new} new, {drops} price drops, {gone} gone.\n"
+                f"{sites}\n{pub}")
+        self.send(title, body, tags="warning" if failed else "white_check_mark",
+                  priority=3 if failed else 2, report_button=bool(published), ops=True)
 
     def ops(self, title, body, priority=4):
         """An error for the maintainer: crashed runs, failed publishes."""
