@@ -66,6 +66,19 @@ Install the ntfy app (iOS/Android) and subscribe on server `ntfy.sh`. Both topic
 - a warning when a site fails 3 runs in a row (usually means its markup or bot protection changed), and a note when it recovers
 - a crashed run (with the end of the traceback) or a failed GitHub Pages push
 
+`ask_topic`, for asking questions about the cars:
+
+- post a question (or a listing link) to the topic and an answer comes back on the same topic in under a minute.
+  `scripts/ask.py` listens and runs `claude -p` with the current listings, reliability notes and generation notes in
+  the prompt. Links to car sites are opened in the stealth browser and VINs are decoded with NHTSA recalls.
+- Claude runs with no tools, MCP servers or skills, so a question can't read files, run commands or change the
+  report; changes still go through the maintainer.
+- `[ask] daily_limit` questions a day (Central time); past that it replies with a limit notice and warns `ops_topic`
+  once. Failed answers are reported to `ops_topic` too.
+- cron restarts the listener if it stops:
+  `*/5 * * * * cd /home/pete/minivan-finder && flock -n logs/.ask.lock .venv/bin/python scripts/ask.py >> logs/ask.log 2>&1`
+- `scripts/ask.py --once "question"` prints an answer without touching ntfy.
+
 ## Publishing
 
 This repo is private. The report goes to `docs/` in the public repo

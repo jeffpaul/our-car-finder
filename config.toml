@@ -37,9 +37,16 @@ server = "https://ntfy.sh"
 # (not committed), e.g.  [ntfy]  topic = "carfinder-<random>"
 topic = ""
 # Errors (failing sites, crashed runs, failed publishes) go to ops_topic if set, also in config.local.toml.
+# Questions posted to ask_topic (also in config.local.toml) are answered by scripts/ask.py.
 notify_near_misses = true
 # Warn when a source has failed this many runs in a row.
 source_failure_alert_after = 3
+
+[ask]
+# scripts/ask.py answers questions posted to the ntfy ask_topic using Claude.
+model = "sonnet"
+# Questions answered per day (Central time) before it stops and warns ops_topic.
+daily_limit = 20
 
 [publish]
 # The report is pushed to docs/ in this repo; GitHub Pages serves that folder.
