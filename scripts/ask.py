@@ -251,6 +251,12 @@ def handle(cfg, st, question):
     finally:
         db.close()
     post(ask_url, answer, "Answer", ANSWER_TAG)
+    # A quiet copy for the maintainer, to see how the ask topic gets used.
+    try:
+        post(ops_url, f"Q: {question[:500]}\n\nA: {answer[:900]}\n\n{st['count']} of {limit} today",
+             "Car question asked", "speech_balloon", priority=2)
+    except Exception as e:
+        log.warning("ops copy failed: %s", e)
     st["history"] = history + [{"t": time.time(), "q": question[:1000], "a": answer[:2000]}]
     log.info("answered %r (%d chars)", question[:80], len(answer))
 

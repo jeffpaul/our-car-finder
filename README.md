@@ -73,6 +73,7 @@ Install the ntfy app (iOS/Android) and subscribe on server `ntfy.sh`. Both topic
   the prompt. Links to car sites are opened in the stealth browser and VINs are decoded with NHTSA recalls.
 - Claude runs with no tools, MCP servers or skills, so a question can't read files, run commands or change the
   report; changes still go through the maintainer.
+- each question and answer is copied to `ops_topic` (low priority) so the maintainer can see how it's used.
 - `[ask] daily_limit` questions a day (Central time); past that it replies with a limit notice and warns `ops_topic`
   once. Failed answers are reported to `ops_topic` too.
 - cron restarts the listener if it stops:
