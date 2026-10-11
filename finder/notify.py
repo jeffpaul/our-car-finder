@@ -136,7 +136,7 @@ class Notifier:
         sites = "\n".join(f"{'✗' if status[n] else '✓'} {n}: " + (status[n][:120] if status[n] else f"{counts.get(n, 0)} listings")
                           for n in sorted(status))
         pub = {True: "Report published.", False: "Report NOT published.", None: "Publishing skipped."}[published]
-        body = (f"{raw:,} listings scanned, {in_range} in range: {new} new, {drops} price drops, {gone} gone.\n"
+        body = (f"{raw:,} listings scanned, {in_range} in range: {new} new, {drops} price drop{'' if drops == 1 else 's'}, {gone} gone.\n"
                 f"{sites}\n{pub}")
         self.send(title, body, tags="warning" if failed else "white_check_mark",
                   priority=3 if failed else 2, report_button=bool(published), ops=True)
