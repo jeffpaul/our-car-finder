@@ -5,3 +5,5 @@ out/
 logs/
 pages/
 config.local.toml
+slides/.venv/
+slides/voices/
