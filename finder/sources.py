@@ -17,7 +17,8 @@ from urllib.parse import quote, urlencode
 from curl_cffi import requests
 
 log = logging.getLogger("finder")
-YEAR_RE = re.compile(r"\b(199\d|20[0-3]\d)\b")
+# A year can run into the make ("2016Honda"), but not into miles ("2000mi", "2015k").
+YEAR_RE = re.compile(r"\b(199\d|20[0-3]\d)(?:\b|(?=[A-Za-z])(?![kK]\b|mi))")
 
 
 def year_from(text):
@@ -187,7 +188,17 @@ def _craigslist_model(s, mdl):
             lat=lat, lon=lon,
             image_url=f"https://images.craigslist.org/{img}_600x450.jpg" if img else None,
         ))
-    return [x for x in out if mdl.matches(x["title"])]
+    out = [x for x in out if mdl.matches(x["title"])]
+    # Some titles leave out the year ("Honda CR-V for sale"); the listing page has it as a structured field.
+    for x in [x for x in out if not x["year"] and x["url"]][:15]:
+        try:
+            page = http().get(x["url"], timeout=30)
+            m = re.search(r"<title>(.*?)</title>", page.text, re.S)
+            x["year"] = year_from(m.group(1)) if m else None
+        except Exception as e:
+            log.warning("craigslist year lookup failed for %s: %s", x["url"], e)
+        time.sleep(1)
+    return out
 
 
 # --- Browser-based sources ------------------------------------------------------
