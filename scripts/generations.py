@@ -12,8 +12,9 @@ import statistics
 import sys
 from pathlib import Path
 
-ROOT = Path("/home/pete/minivan-finder")
+ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from finder.config import general, load_config  # noqa: E402
 from finder.guide_notes import BOTTOM, GENS  # noqa: E402
 from finder.models import BY_KEY, autojunket_url  # noqa: E402
 from finder.reliability import Reliability  # noqa: E402
@@ -25,7 +26,12 @@ rel = Reliability(db)
 rows = [json.loads(r[0]) for r in db.execute("SELECT data FROM listings WHERE gone_on IS NULL")]
 matches = [x for x in rows if x["tier"] == "match" and x.get("year")
            and (x.get("deal") or {}).get("label") != "suspect"]
-REPORT = "https://petenelson.github.io/our-car-finder-report/"
+cfg = load_config()
+REPORT = cfg["publish"].get("page_url", "")
+TITLE = general(cfg)["title"]
+_s = cfg["search"]
+CRITERIA = (f'${_s["price_min"] / 1000:g}–{_s["price_max"] / 1000:g}k, {_s["min_year"]}+, '
+            f'under {_s["max_mileage"] / 1000:g}k miles, within {_s["radius_miles"]} miles of {_s["origin_name"]}')
 
 
 def e(s):
@@ -178,9 +184,9 @@ dd {{ margin:0; }}
 </head>
 <body>
 <div class="wrap">
-  <p class="kicker">Our Car Finder · snapshot from {today}</p>
+  <p class="kicker">{e(TITLE)} · snapshot from {today}</p>
   <h1>Generations guide</h1>
-  <p class="intro">Every model and generation that has listings matching our search right now ($6–10k, 2011+, under 150k miles, within 250 miles of Austin): what changed between years, what to check, and how each model year rates for reliability. This is a one-time snapshot; the <a href="{REPORT}">live report</a> keeps updating.</p>
+  <p class="intro">Every model and generation that has listings matching our search right now ({e(CRITERIA)}): what changed between years, what to check, and how each model year rates for reliability. This is a one-time snapshot; the <a href="{REPORT}">live report</a> keeps updating.</p>
   <nav class="jump">{"".join(f'<a href="#{k}">{e(BY_KEY[k].model)}</a>' for k in GENS if any(x["model_key"] == k for x in matches))}</nav>
 
   <div class="overview">
@@ -210,10 +216,8 @@ if not PUBLISH:
 
 import subprocess  # noqa: E402
 
-import run  # noqa: E402
 from finder.notify import Notifier  # noqa: E402
 
-cfg = run.load_config()
 repo = ROOT / cfg["publish"].get("checkout", "pages")
 
 

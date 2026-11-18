@@ -18,7 +18,6 @@ import re
 import sqlite3
 import sys
 import time
-import tomllib
 import traceback
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from curl_cffi import requests
 from PIL import Image
 
 from finder import models as M
+from finder.config import load_config
 from finder.deals import Market, record_market, thresholds, update_thresholds
 from finder import sources as S
 from finder.geo import Geo
@@ -360,19 +360,6 @@ def rescore(db, rel):
         x["reliability"] = rel.rating(x["model_key"], x.get("year"))
         db.execute("UPDATE listings SET data=? WHERE key=?", (json.dumps(x), key))
     db.commit()
-
-
-def load_config():
-    """config.toml, with config.local.toml (not committed: holds the ntfy topic) merged over it."""
-    cfg = tomllib.load(open(ROOT / "config.toml", "rb"))
-    local = ROOT / "config.local.toml"
-    if local.exists():
-        for section, values in tomllib.load(open(local, "rb")).items():
-            if isinstance(values, dict):
-                cfg.setdefault(section, {}).update(values)
-            else:
-                cfg[section] = values
-    return cfg
 
 
 def main():

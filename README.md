@@ -27,11 +27,13 @@ printf '[ntfy]\ntopic = "carfinder-%s"\n' "$(openssl rand -hex 6)" > config.loca
 crontab -e   # add:  0 * * * * /path/to/run_daily.sh
 ```
 
-`run_daily.sh` exits unless it's 7 AM or 4 PM in America/Chicago, so the hourly cron entry follows daylight saving.
+`run_daily.sh` exits unless the hour is one of `[general] run_hours` (7 AM and 4 PM) in `[general] timezone`
+(America/Chicago), so the hourly cron entry follows daylight saving.
 
 ## Files
 
-- `config.toml`: search terms, models, sources, deal scoring, where to publish
+- `config.toml`: name, maintainer, time zone and run hours, search terms, models, sources, deal scoring, where to publish
+- `finder/config.py`: loads `config.toml` with `config.local.toml` merged over it
 - `config.local.toml` (not committed): the ntfy topic and any other local overrides
 - `finder/models.py`: model list, per-site URL slugs and cargo specs by generation
 - `finder/sources.py`: one scraper per site
@@ -74,10 +76,10 @@ Install the ntfy app (iOS/Android) and subscribe on server `ntfy.sh`. Both topic
 - Claude runs with no tools, MCP servers or skills, so a question can't read files, run commands or change the
   report; changes still go through the maintainer.
 - each question and answer is copied to `ops_topic` (low priority) so the maintainer can see how it's used.
-- `[ask] daily_limit` questions a day (Central time); past that it replies with a limit notice and warns `ops_topic`
+- `[ask] daily_limit` questions a day (in `[general] timezone`); past that it replies with a limit notice and warns `ops_topic`
   once. Failed answers are reported to `ops_topic` too.
 - cron restarts the listener if it stops:
-  `*/5 * * * * cd /home/pete/minivan-finder && flock -n logs/.ask.lock .venv/bin/python scripts/ask.py >> logs/ask.log 2>&1`
+  `*/5 * * * * cd /path/to/our-car-finder && flock -n logs/.ask.lock .venv/bin/python scripts/ask.py >> logs/ask.log 2>&1`
 - `scripts/ask.py --once "question"` prints an answer without touching ntfy.
 
 ## Publishing

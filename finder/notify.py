@@ -4,6 +4,8 @@ import logging
 
 from curl_cffi import requests
 
+from .config import general
+
 log = logging.getLogger("finder")
 MAX_INDIVIDUAL = 8
 
@@ -56,6 +58,7 @@ class Notifier:
         # Errors and health alerts go to the maintainer's topic; car alerts to the main one.
         self.ops_url = f'{n["server"].rstrip("/")}/{n["ops_topic"]}' if n.get("ops_topic") else self.url
         self.report_url = cfg.get("publish", {}).get("page_url") or None
+        self.title = general(cfg)["title"]
         self.enabled = enabled and bool(n.get("topic"))
         self.http = requests.Session()
 
@@ -115,7 +118,7 @@ class Notifier:
     def first_run(self, items):
         items = list(items)
         matches = sum(1 for x in items if x["tier"] == "match")
-        self.send("Minivan finder is running",
+        self.send(f"{self.title} is running",
                   f"First scan found {matches} matches and {len(items) - matches} near misses. "
                   "From now on you'll get a notification for each new listing and price drop.",
                   tags="white_check_mark")
