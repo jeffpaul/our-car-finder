@@ -1,5 +1,13 @@
 # Minivan Finder
 
+> **This copy is personalized for a different search.** `config.toml` now looks for five plug-in hybrid SUVs
+> (Jeep Wrangler 4xe, Jeep Grand Cherokee 4xe, Mitsubishi Outlander PHEV, Hyundai Tucson Plug-in Hybrid, Toyota
+> RAV4 Prime), 2021 or newer, under 60,000 miles, $15,000–$45,000, within 100 miles of Downers Grove, IL. The
+> settings mirror [automobile-deal-tracker](https://github.com/jeffpaul/automobile-deal-tracker). The per-site
+> model slugs in `finder/models.py` and the NHTSA names in `finder/reliability.py` for these five models have not
+> been run against the live sites yet: do the one-source test in GETTING_STARTED.md section 5, step 6 first.
+> The rest of this file describes the original Austin setup.
+
 Daily search for used Toyota, Honda, Lexus and Acura people-haulers ($6–10k, 2011+, under 150k miles, within 250 driving
 miles of McNeil Dr & US-183 in Austin). New matches and price drops go to your phone through ntfy, and a
 report page is published to GitHub Pages.

@@ -1,38 +1,49 @@
-# Minivan finder settings. Edit and the next run picks them up.
+# PHEV / 4xe finder settings. Edit and the next run picks them up.
+#
+# Personalized from jeffpaul/automobile-deal-tracker (tracker/config.py): the same five plug-in
+# hybrid SUVs, searched within 100 miles of Downers Grove, IL, for a winter daily driver.
 
 [general]
 # Shown on the report page and in notifications.
-title = "Minivan Finder"
+title = "PHEV / 4xe Finder"
 # Who maintains this copy. The ask service tells people to ask this person for changes.
-maintainer = "Pete"
+maintainer = "JP"
 # Where the shoppers live, for the ask service's prompt.
-home_area = "Austin, TX"
+home_area = "Downers Grove, IL (Chicago suburbs)"
 # Time zone for the run schedule and the ask service's daily limit.
 timezone = "America/Chicago"
 # Hours of the day (24-hour, in timezone) when run_daily.sh does a run. Cron calls it every hour.
-run_hours = [7, 16]
+# 6 AM matches the existing tracker's daily email; 4 PM catches same-day price drops.
+run_hours = [6, 16]
 
 [search]
-# Vehicles to search for. Keys and cargo specs live in finder/models.py:
-# sienna, odyssey, highlander, pilot, 4runner, rav4, crv, venza, priusv, prius, element, rx, gx, mdx, rdx
-models = ["sienna", "odyssey", "highlander", "pilot", "4runner", "rav4", "crv", "venza", "priusv", "prius", "element",
-          "rx", "gx", "mdx", "rdx"]
-origin_name = "McNeil Dr & US-183, Austin"
-origin_lat = 30.4380
-origin_lon = -97.7590
-origin_zip = "78750"
-radius_miles = 250
-min_year = 2011
-max_mileage = 150000
-price_min = 6000
-price_max = 10000
+# Vehicles to search for. Keys and cargo specs live in finder/models.py.
+# The original family-hauler keys (sienna, odyssey, highlander, ...) are still defined there.
+models = ["wrangler4xe", "grandcherokee4xe", "outlanderphev", "tucsonphev", "rav4prime"]
+origin_name = "Downers Grove, IL"
+origin_lat = 41.8089
+origin_lon = -88.0112
+origin_zip = "60515"
+# State added to a listing's city when the site gives a bare city name (Craigslist, Facebook).
+origin_state = "IL"
+radius_miles = 100
+# The tracker's year ranges are soft and differ per model (RAV4 Prime from 2021, Tucson PHEV from
+# 2022, the rest from 2023). This tool has one cutoff, so it uses the oldest.
+min_year = 2021
+# Same cap the tracker's MarketCheck query uses (MC_MAX_MILES).
+max_mileage = 60000
+# The tracker has no budget; it scores everything. This tool needs one, so this band covers about the
+# middle 95% of what the tracker currently lists (roughly $19k to $37k for the Jeeps, more for a
+# RAV4 Prime). Tighten it to your real budget to cut noise.
+price_min = 15000
+price_max = 45000
 # Listings this far outside the price range are kept as "near misses".
-near_miss_margin = 500
+near_miss_margin = 2000
 
 [deals]
 # Cars.com is searched across this wider price band to learn what each model/year/mileage sells for.
-market_price_min = 5000
-market_price_max = 16000
+market_price_min = 12000
+market_price_max = 55000
 
 [sources]
 carscom = true
@@ -41,10 +52,10 @@ carmax = true
 craigslist = true
 facebook = true
 # Facebook Marketplace city slugs to search (logged out, first page of results each).
-facebook_cities = ["austin", "sanantonio", "houston", "dallas"]
+facebook_cities = ["chicago", "milwaukee"]
 # Your nearest Craigslist site (the subdomain of <site>.craigslist.org). The search itself uses origin_zip
 # and radius_miles; this is only sent as the Referer, which the search API expects.
-craigslist_site = "austin"
+craigslist_site = "chicago"
 
 [ntfy]
 server = "https://ntfy.sh"
@@ -53,7 +64,8 @@ server = "https://ntfy.sh"
 topic = ""
 # Errors (failing sites, crashed runs, failed publishes) go to ops_topic if set, also in config.local.toml.
 # Questions posted to ask_topic (also in config.local.toml) are answered by scripts/ask.py.
-notify_near_misses = true
+# With 600+ dealer listings in range, near-miss pushes would be noise.
+notify_near_misses = false
 # Warn when a source has failed this many runs in a row.
 source_failure_alert_after = 3
 
@@ -64,9 +76,11 @@ model = "sonnet"
 daily_limit = 20
 
 [publish]
-# The report is pushed to docs/ in this repo; GitHub Pages serves that folder.
-repo = "git@github.com:petenelson/our-car-finder-report.git"
+# Publishing is off until you create a public report repo with GitHub Pages on its docs/ folder.
+# Then set repo (e.g. "git@github.com:jeffpaul/our-car-finder-report.git") and page_url.
+# Until then the report is only at out/site/index.html on the machine that runs this.
+repo = ""
 branch = "main"
 checkout = "pages"
 path = "docs"
-page_url = "https://petenelson.github.io/our-car-finder-report/"
+page_url = ""

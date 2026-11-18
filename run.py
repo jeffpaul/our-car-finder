@@ -271,7 +271,7 @@ def normalize(raw, cfg, models, geo):
         zlat, zlon, zcity = geo.zip(raw["zip"])
         lat, lon, city = lat if lat is not None else zlat, lon if lon is not None else zlon, city or zcity
     if lat is None and city:
-        lat, lon, _ = geo.place(city if "," in city else f"{city}, TX")
+        lat, lon, _ = geo.place(city if "," in city else f'{city}, {s.get("origin_state", "TX")}')
     drive_mi, drive_min = geo.drive(lat, lon)
     if drive_mi and drive_mi > s["radius_miles"] * 1.15:
         return None

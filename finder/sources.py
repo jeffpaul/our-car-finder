@@ -76,6 +76,10 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
             "page_size": 100, "page": page, "sort": "list_price",
         }
         r = q.get("https://www.cars.com/shopping/results/?" + urlencode(params), timeout=40)
+        if r.status_code == 404 and page == 1:
+            # An unknown model slug must not take down the other models' searches.
+            log.warning("cars.com: no such model %r", slug)
+            break
         r.raise_for_status()
         blobs = re.findall(r'data-vehicle-details="([^"]+)"', r.text)
         new = 0
@@ -315,7 +319,9 @@ def _autotrader_model(s, mdl, client, seen, slug):
         owners = eggs.get("owners", {})
         new = 0
         for lid, it in eggs.get("inventory", {}).items():
-            model = (it.get("model") or {}).get("name", "")
+            # Plug-in versions may carry "4xe"/"Prime"/"Plug-in" in the trim or title, not the model name.
+            model = " ".join(filter(None, [(it.get("model") or {}).get("name"), (it.get("trim") or {}).get("name"),
+                                           it.get("title")]))
             if lid in seen or not mdl.matches(model):
                 continue
             seen.add(lid)

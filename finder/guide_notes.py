@@ -140,6 +140,49 @@ GENS = {
         changes="2016 refresh: more power, new styling, AcuraWatch safety features available.",
         check="Check for misfires and oil burning (cylinder deactivation). Timing belt due about every 105k miles.",
     )],
+    # Plug-in hybrids. The "check" notes carry over the winter-daily-driver priorities from
+    # jeffpaul/automobile-deal-tracker's scorer: all-season tires, heated seats and wheel, blind-spot
+    # monitoring, and smaller wheels matter more here than off-road hardware.
+    "wrangler4xe": [dict(
+        name="JL plug-in hybrid", years=(2021, 2030),
+        power="2.0L turbo 4-cylinder plus two electric motors, 375 hp combined, 8-speed automatic. 17.3 kWh battery, about 21 miles of electric range.",
+        drive="Full-time 4WD on every trim.",
+        features="5 seats, 4-door only. Sahara and High Altitude ride on all-season tires with on-road suspension and offer blind-spot monitoring; Willys and Rubicon come on mud-terrain tires, which grip worse on packed snow and ice.",
+        changes="2024 refresh: new grille, 12.3-inch screen, side curtain airbags, and more trims (Sport S, Willys).",
+        check="Run the VIN at nhtsa.gov/recalls: the high-voltage battery has been recalled for fire risk, and an unrepaired car shouldn't be charged or parked indoors. Confirm it charges and drives in electric mode. Look for the Cold Weather Group (heated seats and wheel, remote start).",
+    )],
+    "grandcherokee4xe": [dict(
+        name="WL plug-in hybrid", years=(2022, 2030),
+        power="2.0L turbo 4-cylinder plus two electric motors, 375 hp combined, 8-speed automatic. 17.3 kWh battery, about 25 miles of electric range.",
+        drive="4WD on every trim.",
+        features="5 seats, two rows only. More comfortable and quieter on the road than the Wrangler. Base, Limited and Overland suit winter commuting best; Summit rides on 21-inch wheels with low-profile tires and Trailhawk on all-terrain tires.",
+        changes="No major changes yet; trims and packages shuffle each year.",
+        check="Run the VIN at nhtsa.gov/recalls (high-voltage battery and loss-of-power recalls). Many were rental cars, so ask for the history report and service records. Confirm it charges and drives in electric mode.",
+    )],
+    "outlanderphev": [dict(
+        name="4th generation", years=(2023, 2030),
+        power="2.4L 4-cylinder plus front and rear electric motors, 248 hp combined. 20 kWh battery, about 38 miles of electric range. Has DC fast charging (CHAdeMO plug).",
+        drive="S-AWC all-wheel drive on every trim.",
+        features="7 seats with a very small 3rd row. SE and SEL have heated front seats (SEL adds a heated wheel); GT trims ride on 20-inch wheels with lower-profile tires, which give up some snow traction.",
+        changes="2023 was the first year of this generation, far roomier and longer-range than the 2018–2022 model.",
+        check="Few widespread problems so far. Confirm both charge ports work. Mitsubishi's 10-year/100k powertrain warranty covers only the first owner, so ask what transfers.",
+    )],
+    "tucsonphev": [dict(
+        name="4th generation", years=(2022, 2030),
+        power="1.6L turbo 4-cylinder plus an electric motor, 261 hp combined, 6-speed automatic. 13.8 kWh battery, about 33 miles of electric range.",
+        drive="HTRAC all-wheel drive on every trim.",
+        features="5 seats. Sold as SEL and Limited; Limited adds heated and ventilated seats, a heated wheel and a surround camera.",
+        changes="2025 refresh: new dashboard with twin 12.3-inch screens, slightly more power.",
+        check="Few widespread problems so far. Run the VIN at nhtsa.gov/recalls. Hyundai's 10-year/100k powertrain warranty covers only the first owner (hybrid battery coverage is separate), so ask what transfers.",
+    )],
+    "rav4prime": [dict(
+        name="5th generation plug-in", years=(2021, 2030),
+        power="2.5L 4-cylinder plus electric motors, 302 hp combined, eCVT. 18.1 kWh battery, about 42 miles of electric range.",
+        drive="Electric on-demand AWD on every trim.",
+        features="5 seats. SE (18-inch wheels) and XSE (19-inch wheels, lower-profile tires). Look for the Weather Package for a heated wheel; XSE packages can add a faster 6.6 kW charger.",
+        changes="Renamed RAV4 Plug-in Hybrid for 2025.",
+        check="The most dependable choice here, and it holds its value, so true bargains are rare. Run the VIN at nhtsa.gov/recalls (2021 models had a cold-weather hybrid-system recall). Confirm which onboard charger it has.",
+    )],
 }
 
 BOTTOM = {
@@ -155,4 +198,9 @@ BOTTOM = {
     "rx": "A luxury Highlander for 5; rare in this budget.",
     "mdx": "Most luxury for the money, with 3 rows and SH-AWD; budget for the timing belt.",
     "rdx": "Lots of listings. The 2013+ V6 is the safer bet over the 1st-gen turbo.",
+    "wrangler4xe": "By far the most listings. For winter commuting pick Sahara or High Altitude over Willys or Rubicon, and confirm the battery recall was done.",
+    "grandcherokee4xe": "The more comfortable Jeep. Plenty of ex-rental cars, so the history report matters more than the price.",
+    "outlanderphev": "The longest list of standard cold-weather features and the only 3rd row; rare within 100 miles.",
+    "tucsonphev": "Usually the cheapest way into a recent plug-in SUV with AWD; only a handful nearby.",
+    "rav4prime": "The safest long-term bet and the longest electric range, priced accordingly.",
 }
