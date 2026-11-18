@@ -277,7 +277,9 @@ th { font-weight: 600; color: var(--ink); }
     f: Object.assign({ price: "", miles: "", dist: "", seller: "", rows: "", owners: "", acc: "", rel: "", source: "", q: "" }, store.get("filters", {})),
   };
   const FILTERS = ["price", "miles", "dist", "seller", "rows", "owners", "acc", "rel", "source", "q"];
-  for (let p = meta.priceMin + 500; p <= meta.priceMax + meta.margin; p += 500)
+  // $500 steps suit a narrow budget; a wide one would make this menu a hundred lines long.
+  const pstep = meta.priceMax - meta.priceMin > 20000 ? 2500 : 500;
+  for (let p = meta.priceMin + pstep; p <= meta.priceMax + meta.margin; p += pstep)
     $("f-price").insertAdjacentHTML("beforeend", `<option value="${p}">Up to ${money(p)}</option>`);
   [...new Set(items.flatMap((i) => Object.keys(i.links)))].sort()
     .forEach((s) => $("f-source").insertAdjacentHTML("beforeend", `<option value="${esc(s)}">${esc(s)}</option>`));
@@ -305,7 +307,7 @@ th { font-weight: 600; color: var(--ink); }
   // Header
   const gen = new Date(meta.generated);
   $("checked").textContent = "Daily used-car watch · checked " + gen.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  $("terms").innerHTML = `<b>${money(meta.priceMin)}–${money(meta.priceMax)}</b>, <b>${meta.minYear} or newer</b>, <b>under ${num(meta.maxMileage)} miles</b>, within <b>${meta.radius} driving miles</b> of ${meta.origin}. Near misses are within ${money(meta.margin)} of the budget.`;
+  $("terms").innerHTML = `<b>${meta.priceMin > 0 ? money(meta.priceMin) + "–" : "Up to "}${money(meta.priceMax)}</b>, <b>${meta.minYear} or newer</b>, <b>under ${num(meta.maxMileage)} miles</b>, within <b>${meta.radius} driving miles</b> of ${meta.origin}. Near misses are within ${money(meta.margin)} of the budget.`;
   const active = items.filter((i) => !i.gone);
   const matches = active.filter((i) => i.tier === "match");
   const closest = matches.filter((i) => i.driveMi != null).sort((a, b) => a.driveMi - b.driveMi)[0];

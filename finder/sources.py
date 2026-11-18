@@ -156,7 +156,7 @@ def _craigslist_model(s, mdl, site):
     params = {
         "batch": "15-0-360-0-0", "cc": "US", "lang": "en", "searchPath": "cta",
         "query": f"{mdl.make} {mdl.model}".lower(), "postal": s["origin_zip"], "search_distance": s["radius_miles"],
-        "min_price": s["price_min"] - s["near_miss_margin"],
+        "min_price": max(0, s["price_min"] - s["near_miss_margin"]),
         "max_price": s["price_max"] + s["near_miss_margin"],
     }
     r = http().get("https://sapi.craigslist.org/web/v8/postings/search/full?" + urlencode(params),
@@ -358,7 +358,7 @@ def facebook(cfg, models, browser):
     try:
         for city, mdl in ((c, m) for c in cfg["sources"]["facebook_cities"] for m in models):
             url = (f"https://www.facebook.com/marketplace/{city}/search?"
-                   f'minPrice={s["price_min"] - s["near_miss_margin"]}&maxPrice={s["price_max"] + s["near_miss_margin"]}'
+                   f'minPrice={max(0, s["price_min"] - s["near_miss_margin"])}&maxPrice={s["price_max"] + s["near_miss_margin"]}'
                    f'&query={quote(mdl.make + " " + mdl.model)}&exact=false')
             pg.goto(url, timeout=60000)
             pg.wait_for_timeout(5000)

@@ -32,17 +32,20 @@ radius_miles = 100
 min_year = 2021
 # Same cap the tracker's MarketCheck query uses (MC_MAX_MILES).
 max_mileage = 60000
-# The tracker has no budget; it scores everything. This tool needs one, so this band covers about the
-# middle 95% of what the tracker currently lists (roughly $19k to $37k for the Jeeps, more for a
-# RAV4 Prime). Tighten it to your real budget to cut noise.
-price_min = 15000
+# The tracker has no budget; it scores everything. This tool needs a ceiling, so $45,000 covers about
+# 95% of what the tracker currently lists (lower it to your real ceiling to cut noise).
+# No lower limit: a good or great deal under $15k should still show up. The pipeline already drops
+# anything under $1,000 and labels cars priced 40% or more under market as "suspect" (usually a
+# down-payment ad or a branded title) without sending a notification for them.
+price_min = 0
 price_max = 45000
 # Listings this far outside the price range are kept as "near misses".
 near_miss_margin = 2000
 
 [deals]
 # Cars.com is searched across this wider price band to learn what each model/year/mileage sells for.
-market_price_min = 12000
+# The low end is also the lowest price Cars.com is asked for, so keep it near zero.
+market_price_min = 1000
 market_price_max = 55000
 
 [sources]
