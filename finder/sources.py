@@ -76,6 +76,10 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
             "page_size": 100, "page": page, "sort": "list_price",
         }
         r = q.get("https://www.cars.com/shopping/results/?" + urlencode(params), timeout=40)
+        if r.status_code == 404 and page == 1:
+            # An unknown model slug must not take down the other models' searches.
+            log.warning("cars.com: no such model %r", slug)
+            break
         r.raise_for_status()
         blobs = re.findall(r'data-vehicle-details="([^"]+)"', r.text)
         new = 0
@@ -152,7 +156,7 @@ def _craigslist_model(s, mdl, site):
     params = {
         "batch": "15-0-360-0-0", "cc": "US", "lang": "en", "searchPath": "cta",
         "query": f"{mdl.make} {mdl.model}".lower(), "postal": s["origin_zip"], "search_distance": s["radius_miles"],
-        "min_price": s["price_min"] - s["near_miss_margin"],
+        "min_price": max(0, s["price_min"] - s["near_miss_margin"]),
         "max_price": s["price_max"] + s["near_miss_margin"],
     }
     r = http().get("https://sapi.craigslist.org/web/v8/postings/search/full?" + urlencode(params),
@@ -315,7 +319,9 @@ def _autotrader_model(s, mdl, client, seen, slug):
         owners = eggs.get("owners", {})
         new = 0
         for lid, it in eggs.get("inventory", {}).items():
-            model = (it.get("model") or {}).get("name", "")
+            # Plug-in versions may carry "4xe"/"Prime"/"Plug-in" in the trim or title, not the model name.
+            model = " ".join(filter(None, [(it.get("model") or {}).get("name"), (it.get("trim") or {}).get("name"),
+                                           it.get("title")]))
             if lid in seen or not mdl.matches(model):
                 continue
             seen.add(lid)
@@ -352,7 +358,7 @@ def facebook(cfg, models, browser):
     try:
         for city, mdl in ((c, m) for c in cfg["sources"]["facebook_cities"] for m in models):
             url = (f"https://www.facebook.com/marketplace/{city}/search?"
-                   f'minPrice={s["price_min"] - s["near_miss_margin"]}&maxPrice={s["price_max"] + s["near_miss_margin"]}'
+                   f'minPrice={max(0, s["price_min"] - s["near_miss_margin"])}&maxPrice={s["price_max"] + s["near_miss_margin"]}'
                    f'&query={quote(mdl.make + " " + mdl.model)}&exact=false')
             pg.goto(url, timeout=60000)
             pg.wait_for_timeout(5000)

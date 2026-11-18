@@ -85,10 +85,13 @@ def listings_block(db):
     return "\n".join(sorted(lines))
 
 
-def notes_block():
+def notes_block(enabled=None):
+    """Model notes for the prompt; only the searched models when enabled is given."""
     from finder.reliability import KNOWN_ISSUES
     out = []
     for key, gens in GENS.items():
+        if enabled is not None and key not in enabled:
+            continue
         m = BY_KEY[key]
         out.append(f"## {m.make} {m.model}: {BOTTOM.get(key, '')}")
         for g in gens:
@@ -183,7 +186,7 @@ def build_prompt(cfg, db, question, history):
         price_min=s["price_min"], price_max=s["price_max"], min_year=s["min_year"], max_mileage=s["max_mileage"],
         radius=s["radius_miles"], origin=s["origin_name"], report=cfg["publish"]["page_url"],
         today=dt.datetime.now(timezone(cfg)).strftime("%A, %B %-d, %Y"), n=listings.count("\n") + 1, listings=listings,
-        notes=notes_block())
+        notes=notes_block(s.get("models")))
     convo = "".join(f"Earlier question: {h['q']}\nYour answer: {h['a']}\n\n" for h in history)
     extra = extras(question)
     user = f"{convo}{'Looked up for this question:' + chr(10) + extra + chr(10) * 2 if extra else ''}Question: {question}"

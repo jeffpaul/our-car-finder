@@ -21,9 +21,17 @@ SALES = {
     "sienna": 120_000, "odyssey": 115_000, "highlander": 170_000, "pilot": 140_000, "4runner": 100_000,
     "rav4": 330_000, "crv": 330_000, "venza": 40_000, "priusv": 25_000, "prius": 140_000, "element": 15_000,
     "rx": 100_000, "gx": 25_000, "mdx": 55_000, "rdx": 45_000,
+    # Plug-in hybrids: rough average US sales per year since launch. These are small numbers, so one
+    # recall campaign can swing the complaint rate; read the stars as a hint only.
+    "wrangler4xe": 50_000, "grandcherokee4xe": 30_000, "outlanderphev": 8_000, "tucsonphev": 10_000,
+    "rav4prime": 25_000,
 }
 # NHTSA files complaints under one name per variant; the RX uses the RX 350, its main version.
-NHTSA_NAMES = {"crv": "CR-V", "priusv": "PRIUS V", "4runner": "4RUNNER", "rx": "RX350", "gx": "GX460"}
+NHTSA_NAMES = {"crv": "CR-V", "priusv": "PRIUS V", "4runner": "4RUNNER", "rx": "RX350", "gx": "GX460",
+               # Not yet checked against the live NHTSA API. If a model shows no stars, look up the
+               # name NHTSA uses at api.nhtsa.gov/products/vehicle/models?modelYear=2023&make=<make>&issueType=c
+               "wrangler4xe": "WRANGLER 4XE", "grandcherokee4xe": "GRAND CHEROKEE 4XE",
+               "outlanderphev": "OUTLANDER PHEV", "tucsonphev": "TUCSON PLUG-IN HYBRID", "rav4prime": "RAV4 PRIME"}
 
 # Common problems reported for each generation (first year, last year, note).
 KNOWN_ISSUES = {
@@ -52,6 +60,11 @@ KNOWN_ISSUES = {
             (2014, 2020, "2016+ 9-speed transmission draws rough-shifting complaints. Timing belt is due about every 105k miles.")],
     "rdx": [(2007, 2012, "The turbo 4-cylinder can need turbo work and burn oil at high mileage."),
             (2013, 2018, "V6 cylinder deactivation is linked to oil burning and misfires; timing belt is due about every 105k miles.")],
+    "wrangler4xe": [(2021, 2030, "The high-voltage battery has been recalled for fire risk; check the VIN at nhtsa.gov/recalls before buying. In cold weather the engine can run on its own to refresh fuel and oil, which cuts electric driving in winter.")],
+    "grandcherokee4xe": [(2022, 2030, "High-voltage battery and loss-of-power recalls; check the VIN at nhtsa.gov/recalls. Owners also report software and infotainment glitches. Many were rental cars.")],
+    "outlanderphev": [(2023, 2030, "Few widespread problems reported so far for this generation.")],
+    "tucsonphev": [(2022, 2030, "Few widespread problems reported so far; check the VIN for open recalls.")],
+    "rav4prime": [(2021, 2030, "Few widespread problems. 2021 models had a recall for the hybrid system shutting down in very cold weather; confirm it was done.")],
 }
 
 LABELS = {5: "Excellent", 4: "Above average", 3: "Average", 2: "Below average", 1: "Poor"}
