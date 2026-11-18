@@ -1,5 +1,17 @@
 # Minivan finder settings. Edit and the next run picks them up.
 
+[general]
+# Shown on the report page and in notifications.
+title = "Minivan Finder"
+# Who maintains this copy. The ask service tells people to ask this person for changes.
+maintainer = "Pete"
+# Where the shoppers live, for the ask service's prompt.
+home_area = "Austin, TX"
+# Time zone for the run schedule and the ask service's daily limit.
+timezone = "America/Chicago"
+# Hours of the day (24-hour, in timezone) when run_daily.sh does a run. Cron calls it every hour.
+run_hours = [7, 16]
+
 [search]
 # Vehicles to search for. Keys and cargo specs live in finder/models.py:
 # sienna, odyssey, highlander, pilot, 4runner, rav4, crv, venza, priusv, prius, element, rx, gx, mdx, rdx
@@ -30,6 +42,9 @@ craigslist = true
 facebook = true
 # Facebook Marketplace city slugs to search (logged out, first page of results each).
 facebook_cities = ["austin", "sanantonio", "houston", "dallas"]
+# Your nearest Craigslist site (the subdomain of <site>.craigslist.org). The search itself uses origin_zip
+# and radius_miles; this is only sent as the Referer, which the search API expects.
+craigslist_site = "austin"
 
 [ntfy]
 server = "https://ntfy.sh"

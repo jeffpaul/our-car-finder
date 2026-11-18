@@ -141,14 +141,14 @@ def carscom_history(todo, limit=60, delay=1.5):
 def craigslist(cfg, models):
     out, seen = [], set()
     for mdl in models:
-        for x in _craigslist_model(cfg["search"], mdl):
+        for x in _craigslist_model(cfg["search"], mdl, cfg["sources"].get("craigslist_site", "austin")):
             if x["id"] not in seen:
                 seen.add(x["id"])
                 out.append(x)
     return out
 
 
-def _craigslist_model(s, mdl):
+def _craigslist_model(s, mdl, site):
     params = {
         "batch": "15-0-360-0-0", "cc": "US", "lang": "en", "searchPath": "cta",
         "query": f"{mdl.make} {mdl.model}".lower(), "postal": s["origin_zip"], "search_distance": s["radius_miles"],
@@ -156,7 +156,7 @@ def _craigslist_model(s, mdl):
         "max_price": s["price_max"] + s["near_miss_margin"],
     }
     r = http().get("https://sapi.craigslist.org/web/v8/postings/search/full?" + urlencode(params),
-                   headers={"Referer": "https://austin.craigslist.org/"}, timeout=40)
+                   headers={"Referer": f"https://{site}.craigslist.org/"}, timeout=40)
     r.raise_for_status()
     data = r.json()["data"]
     dec = data["decode"]

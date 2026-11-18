@@ -2,8 +2,10 @@
 import datetime as dt
 import json
 import shutil
+from html import escape
 from pathlib import Path
 
+from .config import general
 from .models import autojunket_url
 
 TEMPLATE = Path(__file__).with_name("report_template.html")
@@ -63,7 +65,8 @@ def build_report(db, cfg, models, site_dir, thumbs_dir, now):
         "health": health,
     }
     payload = json.dumps({"meta": meta, "items": items}, separators=(",", ":")).replace("</", "<\\/")
-    html = TEMPLATE.read_text().replace("__DATA__", payload)
+    title = escape(general(cfg)["title"])
+    html = TEMPLATE.read_text().replace("__TITLE__", title).replace("__DATA__", payload)
     out = site_dir / "index.html"
     out.write_text(html)
 
