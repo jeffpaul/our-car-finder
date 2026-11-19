@@ -12,9 +12,11 @@ import json
 import logging
 import re
 import time
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode
 
 from curl_cffi import requests
+
+from . import flight
 
 log = logging.getLogger("finder")
 # A year can run into the make ("2016Honda"), but not into miles ("2000mi", "2015k").
@@ -75,12 +77,16 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
             "year_min": s["min_year"] - 2, "mileage_max": s["max_mileage"] + 40000,
             "page_size": 100, "page": page, "sort": "list_price",
         }
-        r = q.get("https://www.cars.com/shopping/results/?" + urlencode(params), timeout=40)
-        if r.status_code == 404 and page == 1:
-            # An unknown model slug must not take down the other models' searches.
-            log.warning("cars.com: no such model %r", slug)
+        url = "https://www.cars.com/shopping/results/?" + urlencode(params)
+        r = q.get(url, timeout=40)
+        if r.status_code == 403:  # sometimes refuses one request and serves the next
+            time.sleep(5)
+            r = q.get(url, timeout=40)
+        if r.status_code != 200:
+            # One refused or unknown model must not take down the other models' searches. If every
+            # model fails, the source returns nothing and is reported as failing.
+            log.warning("cars.com: HTTP %s for %s page %d, skipping the rest of this model", r.status_code, slug, page)
             break
-        r.raise_for_status()
         blobs = re.findall(r'data-vehicle-details="([^"]+)"', r.text)
         new = 0
         for b in blobs:
@@ -268,33 +274,64 @@ AUTOTRADER_HOSTS = [
 ]
 
 
+def autotrader_page_data(text):
+    """Listing data from an Autotrader or KBB results page: {"inventory": {...}, "owners": {...}}.
+
+    Handles the streamed format the sites use now and the single JSON block they used before.
+    Returns None for a page with neither (a bot-check or error page)."""
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', text, re.S)
+    if m:
+        try:
+            return json.loads(m.group(1))["props"]["pageProps"]["__eggsState"]
+        except (ValueError, KeyError):
+            pass
+    return flight.page_data(text)
+
+
 class _AutotraderClient:
     def __init__(self):
         self.order = list(range(len(AUTOTRADER_HOSTS)))
         self.sessions = {}
+        self.unknown = set()
 
     def eggs(self, slug, params):
-        """Returns the page's __eggsState listing data from the first host that serves it."""
+        """Returns the page's listing data from the first host that serves it.
+
+        A slug can carry its own filters after a "?", e.g. "jeep/wrangler?fuelTypeGroup=PIH"."""
+        path, _, extra = slug.partition("?")
+        params = {**params, **dict(parse_qsl(extra))}
         errors = []
         for i in list(self.order):
             site, imp, tmpl = AUTOTRADER_HOSTS[i]
             q = self.sessions.setdefault(imp, requests.Session(impersonate=imp))
             try:
-                r = q.get(tmpl.format(slug=slug, q=urlencode(params)), timeout=40)
-                m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
-                if m:
-                    eggs = json.loads(m.group(1))["props"]["pageProps"]["__eggsState"]
+                r = q.get(tmpl.format(slug=path, q=urlencode(params)), timeout=40)
+                t = re.search(r"<title>(.*?)</title>", r.text, re.S)
+                title = t.group(1).strip() if t else ""
+                eggs = autotrader_page_data(r.text) if r.status_code == 200 and "unavailable" not in title.lower() else None
+                if eggs is not None:
                     if self.order[0] != i:
                         log.info("autotrader: switching to %s (%s)", site, imp)
                         self.order.remove(i)
                         self.order.insert(0, i)
+                    # An unknown model is redirected to the make's page (every Jeep, say), which
+                    # would look like a working search that finds almost nothing.
+                    if f"/{path.split('/')[-1]}" not in str(r.url):
+                        if slug not in self.unknown:
+                            self.unknown.add(slug)
+                            log.warning("autotrader: %s doesn't know the model %r (sent to %s)", site, path, str(r.url)[:100])
+                        return {"inventory": {}, "owners": {}}
                     return eggs
-                t = re.search(r"<title>(.*?)</title>", r.text, re.S)
-                errors.append(f"{site}/{imp}: HTTP {r.status_code} {t.group(1).strip()[:40] if t else ''}")
+                errors.append(f"{site}/{imp}: HTTP {r.status_code} {title[:40]}")
             except Exception as e:
                 errors.append(f"{site}/{imp}: {e}"[:80])
             time.sleep(2)
         raise RuntimeError("Autotrader and KBB both blocked: " + "; ".join(errors))
+
+
+def _name(v):
+    """Autotrader gives trim and model as {"name": ...}; tolerate a plain string too."""
+    return v.get("name") if isinstance(v, dict) else v
 
 
 def autotrader(cfg, models):
@@ -316,31 +353,34 @@ def _autotrader_model(s, mdl, client, seen, slug):
             "sortBy": "derivedpriceASC", "numRecords": 25, "firstRecord": first,
         }
         eggs = client.eggs(slug, params)
-        owners = eggs.get("owners", {})
+        owners = eggs.get("owners") or {}
         new = 0
-        for lid, it in eggs.get("inventory", {}).items():
+        for lid, it in (eggs.get("inventory") or {}).items():
+            trim = _name(it.get("trim"))
+            title = (it.get("title") or "").replace("Used ", "", 1)
             # Plug-in versions may carry "4xe"/"Prime"/"Plug-in" in the trim or title, not the model name.
-            model = " ".join(filter(None, [(it.get("model") or {}).get("name"), (it.get("trim") or {}).get("name"),
-                                           it.get("title")]))
-            if lid in seen or not mdl.matches(model):
+            if lid in seen or not mdl.matches(" ".join(filter(None, [_name(it.get("model")), trim, title]))):
                 continue
             seen.add(lid)
             new += 1
-            own = owners.get(str(it.get("ownerId")), {})
+            if not mdl.matches(title):  # later steps identify the model from the title alone
+                title = " ".join(str(p) for p in (it.get("year"), mdl.make, mdl.model, trim) if p)
+            own = owners.get(str(it.get("ownerId"))) or (it.get("owner") if isinstance(it.get("owner"), dict) else {})
             addr = ((own.get("location") or {}).get("address") or {})
-            srcs = (it.get("images") or {}).get("sources") or []
-            pd = it.get("pricingDetail") or {}
+            images = it.get("images")
+            srcs = (images.get("sources") if isinstance(images, dict) else images) or []
+            pd = it.get("pricingDetail") if isinstance(it.get("pricingDetail"), dict) else {}
+            miles = it.get("mileage")
             out.append(blank(
                 "Autotrader", lid, url=f"https://www.autotrader.com/cars-for-sale/vehicle/{lid}",
-                title=(it.get("title") or "").replace("Used ", "", 1),
-                year=to_int(it.get("year")), trim=(it.get("trim") or {}).get("name"),
-                price=to_int(pd.get("salePrice") or pd.get("displayPrice") or pd.get("incentive")),
-                mileage=to_int((it.get("mileage") or {}).get("value")), vin=it.get("vin"),
+                title=title, year=to_int(it.get("year")), trim=trim,
+                price=to_int(pd.get("salePrice") or pd.get("displayPrice") or pd.get("incentive") or it.get("price")),
+                mileage=to_int(miles.get("value") if isinstance(miles, dict) else miles), vin=it.get("vin"),
                 seller=own.get("name") or it.get("ownerName"),
                 private=bool(own.get("privateSeller")),
                 city=f'{addr["city"]}, {addr.get("state", "")}' if addr.get("city") else None,
                 zip=addr.get("zip"), lat=addr.get("latitude"), lon=addr.get("longitude"),
-                image_url=srcs[0]["src"] if srcs else None,
+                image_url=srcs[0].get("src") if srcs and isinstance(srcs[0], dict) else None,
                 kbb=to_int(pd.get("kbbFppAmount")), deal_indicator=pd.get("dealIndicator"),
             ))
         if new == 0:
