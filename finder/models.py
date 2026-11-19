@@ -77,8 +77,9 @@ MODELS = [
 
     # Plug-in hybrid SUVs. Cars.com lists each as its own model. Autotrader does not: there a plug-in is
     # the plain model filtered by fuel type ("PIH" is its code for plug-in hybrid), so those slugs carry
-    # the filter. The Cars.com and Autotrader slugs were checked against the live sites on 2026-11-19;
-    # the CarMax ones have not been. Cargo figures are approximate.
+    # the filter. All slugs were checked against the live sites on 2026-11-19. CarMax has an address for
+    # the two Jeeps and the RAV4 Prime only; an address it doesn't know quietly returns the whole make,
+    # so the others search by make and keep the cars whose name matches. Cargo figures are approximate.
     Model("wrangler4xe", "Jeep", "Wrangler 4xe", "Plug-in hybrid 4x4", "5",
           ("jeep-wrangler_4xe", "jeep-wrangler_unlimited_4xe"), "jeep/wrangler?fuelTypeGroup=PIH", "jeep/wrangler-4xe",
           r"\bwrangler\b.*\b4xe\b", [(2021, 2030, 67.4, 27.7, None)]),
@@ -86,15 +87,15 @@ MODELS = [
           "jeep-grand_cherokee_4xe", "jeep/grand-cherokee?fuelTypeGroup=PIH", "jeep/grand-cherokee-4xe",
           r"\bgrand\s+cherokee\b.*\b4xe\b", [(2022, 2030, 70.8, 37.7, None)]),
     Model("outlanderphev", "Mitsubishi", "Outlander PHEV", "Plug-in hybrid 3-row SUV", "7",
-          "mitsubishi-outlander_phev", "mitsubishi/outlander?fuelTypeGroup=PIH", "mitsubishi/outlander-phev",
+          "mitsubishi-outlander_phev", "mitsubishi/outlander?fuelTypeGroup=PIH", "mitsubishi",
           r"\boutlander\b.*\b(?:phev|plug[\s-]?in)\b", [(2023, 2030, 64.7, 30.8, 12.8)]),
     Model("tucsonphev", "Hyundai", "Tucson Plug-in Hybrid", "Plug-in hybrid compact SUV", "5",
-          "hyundai-tucson_plug_in_hybrid", "hyundai/tucson?fuelTypeGroup=PIH", "hyundai/tucson-plug-in-hybrid",
+          "hyundai-tucson_plug_in_hybrid", "hyundai/tucson?fuelTypeGroup=PIH", "hyundai",
           r"\btucson\b.*\b(?:phev|plug[\s-]?in)\b", [(2022, 2030, 66.3, 31.9, None)]),
     # Renamed "RAV4 Plug-in Hybrid" for 2025.
     Model("rav4prime", "Toyota", "RAV4 Prime", "Plug-in hybrid compact SUV", "5",
           ("toyota-rav4_prime", "toyota-rav4_plug_in_hybrid"), "toyota/rav4?fuelTypeGroup=PIH",
-          ("toyota/rav4-prime", "toyota/rav4-plug-in-hybrid"),
+          ("toyota/rav4-prime", "toyota"),
           r"\brav\s?-?4\b.*\b(?:prime|phev|plug[\s-]?in)\b", [(2021, 2030, 69.8, 33.5, None)]),
 ]
 

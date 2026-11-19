@@ -3,12 +3,13 @@
 
     .venv/bin/python scripts/diagnose.py
 
-Makes spaced-out requests (three to four minutes in total), changes nothing in the database and
+Makes spaced-out requests (about three minutes in total), changes nothing in the database and
 sends no notifications. Paste the output to whoever is fixing the scraper. The pages it looked at
 are also saved in out/debug/ in case they are asked for.
 """
 import html
 import json
+import logging
 import re
 import sqlite3
 import sys
@@ -25,12 +26,10 @@ from curl_cffi import requests  # noqa: E402
 from finder import models as M  # noqa: E402
 from finder import sources as S  # noqa: E402
 from finder.config import load_config  # noqa: E402
-from finder.reliability import NHTSA_NAMES  # noqa: E402
 
 DEBUG = ROOT / "out/debug"
 BLOCK_MARKERS = ["captcha-delivery", "datadome", "px-captcha", "perimeterx", "cf-chl", "just a moment", "akamai",
                  "incapsula", "access denied", "unusual activity"]
-HISTORY_WORDS = r"accident|owner|title|autocheck|carfax|personal.?use|history|damage"
 
 
 def save(name, text):
@@ -66,31 +65,20 @@ def database():
         ("NHTSA (model, year, complaints, recalls)",
          "SELECT model_key, year, complaints, recalls FROM reliability ORDER BY 1, 2"),
         ("active listings (site, model, count)",
-         "SELECT json_extract(data, '$.source'), json_extract(data, '$.model'), count(*) FROM listings "
-         "WHERE gone_on IS NULL GROUP BY 1, 2"),
-        ("history filled in (source of history, count)",
-         "SELECT json_extract(data, '$.history_source'), count(*) FROM listings WHERE gone_on IS NULL GROUP BY 1"),
+         "SELECT j.key, json_extract(l.data, '$.model'), count(*) FROM listings l, json_each(l.data, '$.links') j "
+         "WHERE l.gone_on IS NULL GROUP BY 1, 2"),
+        ("active listings (deal label, count)",
+         "SELECT json_extract(data, '$.deal.label'), count(*) FROM listings WHERE gone_on IS NULL GROUP BY 1"),
+        ("history filled in (source of history, owners, accidents, prior use, count)",
+         "SELECT json_extract(data, '$.history_source'), json_extract(data, '$.owners'), json_extract(data, '$.accidents'), "
+         "json_extract(data, '$.prior_use'), count(*) FROM listings WHERE gone_on IS NULL GROUP BY 1, 2, 3, 4"),
+        ("listing pages checked for history (with a report, without)",
+         "SELECT sum(data != '{}'), sum(data = '{}') FROM carscom_history"),
     ]:
         try:
             print(f"== {label}:", db.execute(sql).fetchall())
         except sqlite3.Error as e:
             print(f"== {label}: {e}")
-
-
-def nhtsa(models):
-    """Complaint and recall counts for 2023 under each name the tool asks NHTSA for."""
-    q = requests.Session(impersonate="chrome")
-    for mdl in models:
-        names = NHTSA_NAMES.get(mdl.key, mdl.model.upper())
-        for name in (names,) if isinstance(names, str) else names:
-            try:
-                p = {"make": mdl.make, "model": name, "modelYear": 2023}
-                c = q.get("https://api.nhtsa.gov/complaints/complaintsByVehicle", params=p, timeout=30).json()
-                r = q.get("https://api.nhtsa.gov/recalls/recallsByVehicle", params=p, timeout=30).json()
-                print(f"== nhtsa 2023 {mdl.make} {name!r}: {len(c.get('results', []))} complaints, {len(r.get('results', []))} recalls")
-            except Exception as e:
-                print(f"== nhtsa 2023 {mdl.make} {name!r}: {type(e).__name__}: {str(e)[:100]}")
-            time.sleep(1)
 
 
 def autotrader(s, models):
@@ -117,18 +105,16 @@ def autotrader(s, models):
                 print("   KEPT:", json.dumps({k: r[k] for k in ("title", "year", "trim", "price", "mileage", "kbb", "deal_indicator", "seller", "city", "zip", "vin")}, ensure_ascii=False))
             kept = {r["id"] for r in rows}
             left = [it for lid, it in raw.items() if lid not in kept and it.get("listingType") != "NEW"]
-            print("   LEFT OUT (not new cars):", [(str(it.get("title"))[:45], S._name(it.get("model")), str(it.get("fuelType"))[:45]) for it in left[:5]])
-            if raw and not shown_raw:
+            fuel = lambda it: (it.get("fuelType") or {}).get("group") if isinstance(it.get("fuelType"), dict) else it.get("fuelType")  # noqa: E731
+            print(f"   LEFT OUT ({len(left)} that are not new cars):", [(S._at_title(it)[:40], S._name(it.get("model")), str(fuel(it))[:22]) for it in left[:8]])
+            if rows and not shown_raw:
                 shown_raw = True
-                it = raw.get(rows[0]["id"]) if rows else next(iter(raw.values()))
-                print("   RAW KEYS:", sorted(it))
-                for k in ("pricingDetail", "mileage", "title", "trim", "model", "year", "fuelType", "listingType", "vin", "price"):
-                    print(f"   RAW {k}:", json.dumps(it.get(k), ensure_ascii=False)[:400])
+                print("   RAW pricingDetail:", json.dumps(raw[rows[0]["id"]].get("pricingDetail"), ensure_ascii=False)[:700])
             time.sleep(3)
 
 
 def carscom_ids(s, mdl):
-    """A few listing ids from the first Cars.com results page of a model, and that page's address."""
+    """A few listing ids from the first Cars.com results page of a model, each with that page's address."""
     q = requests.Session(impersonate="chrome")
     p = {"makes[]": mdl.make.lower(), "models[]": S.slugs(mdl.carscom)[0], "maximum_distance": s["radius_miles"],
          "zip": s["origin_zip"], "stock_type": "used", "page_size": 100, "page": 1}
@@ -137,87 +123,50 @@ def carscom_ids(s, mdl):
     if r.status_code == 403:
         time.sleep(5)
         r = q.get(url, timeout=40)
-    blobs = [json.loads(html.unescape(b)) for b in re.findall(r'data-vehicle-details="([^"]+)"', r.text)]
-    print(f"== cars.com search: HTTP {r.status_code}, {len(blobs)} cars on the page")
-    if blobs:
-        print("   search card fields:", json.dumps(blobs[0], ensure_ascii=False)[:900])
-        card = re.search(r'<[^>]+data-vehicle-details=.*?(?=<[^>]+data-vehicle-details=|\Z)', r.text, re.S)
-        print("   search card text:", visible(card.group(0))[:500] if card else None)
-    return [b["listingId"] for b in blobs if b.get("listingId")][:3], str(r.url)
-
-
-def history_report(page):
-    """Prints where a Cars.com listing page keeps the vehicle history, in markup, text and data."""
-    body = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S)
-    text = visible(page)
-    print(f"   'AutoCheck' appears {page.count('AutoCheck')} times in the page, {body.count('AutoCheck')} outside scripts, "
-          f"{text.count('AutoCheck')} in the text; old history box {'stat__label' in page}")
-    for label, src, before, after in (("MARKUP", body, 600, 2400), ("TEXT", text, 300, 900)):
-        hits = [m.start() for m in re.finditer(r"AutoCheck|accidents? reported|No accident|[0-9] owner|1-owner|Clean title", src, re.I)]
-        last, shown = -10000, 0
-        for i in hits:
-            if i - last > after and shown < (1 if label == "MARKUP" else 3):
-                print(f"   {label} near {src[i:i + 20]!r}:", squeeze(src[max(0, i - before):i + after]))
-                last, shown = i, shown + 1
-    facts = re.findall(r'"([A-Za-z_]*(?:' + HISTORY_WORDS + r')[A-Za-z_]*)"\s*:\s*("[^"]{0,60}"|[\w.\-]+)', html.unescape(page), re.I)
-    print("   DATA fields:", sorted(set(facts))[:40])
-    tags = re.findall(r'<([a-z0-9-]+)[^>]*\b(?:class|id|data-[a-z-]+)="([^"]*(?:' + HISTORY_WORDS + r')[^"]*)"', body, re.I)
-    print("   TAGS:", sorted({(t, c[:70]) for t, c in tags})[:40])
+    ids = [json.loads(html.unescape(b)).get("listingId") for b in re.findall(r'data-vehicle-details="([^"]+)"', r.text)]
+    print(f"== cars.com search for a {mdl.model}: HTTP {r.status_code}, {len(ids)} cars on the page")
+    return [(i, str(r.url)) for i in ids if i][:3]
 
 
 def browser_checks(s, models):
-    """Cars.com listing pages and CarMax searches, in the stealth browser."""
-    try:
-        ids, ref = carscom_ids(s, models[0])
-    except Exception as e:
-        print(f"== cars.com search: {type(e).__name__}: {str(e)[:150]}")
-        ids, ref = [], None
+    """Cars.com vehicle history and the CarMax searches, in the stealth browser, using the real scraper code."""
+    todo = []
+    for mdl in models[:2]:
+        try:
+            todo += carscom_ids(s, mdl)
+        except Exception as e:
+            print(f"== cars.com search: {type(e).__name__}: {str(e)[:150]}")
+        time.sleep(2)
     with S.Browser() as b:
-        pg = b.page()
-        for n, lid in enumerate(ids):
-            url = f"https://www.cars.com/vehicledetail/{lid}/"
-            try:
-                t0 = time.time()
-                if n == 0:  # the first one the careful way: search page first, then the listing
-                    pg.goto(ref, timeout=60000)
-                    pg.wait_for_timeout(4000)
-                    resp = pg.goto(url, timeout=60000, referer=ref)
-                    pg.wait_for_timeout(5000)
-                else:  # the rest the quick way, to see whether that is enough
-                    resp = pg.goto(url, timeout=60000, wait_until="domcontentloaded")
-                    pg.wait_for_timeout(1500)
-                t = pg.content()
-                print(f"== cars.com listing {n + 1} ({'via search page' if n == 0 else 'direct'}): HTTP {resp.status if resp else None}, "
-                      f"{time.time() - t0:.0f}s, {len(t)} chars, title {pg.title()[:60]!r}, block markers {markers(t)}")
-                if n == 0:
-                    save("carscom-listing-browser.html", t)
-                    history_report(t)
-                else:
-                    print("   TEXT:", [squeeze(m.group(0)) for m in re.finditer(r".{0,80}(?:AutoCheck|accidents? reported|No accident|[0-9] owner|Clean title).{0,160}", visible(t), re.I)][:3])
-            except Exception as e:
-                print(f"== cars.com listing {n + 1}: {type(e).__name__}: {str(e)[:200]}")
-        pg.close()
+        pages, parse = [], S.carscom_history_parse
+        S.carscom_history_parse = lambda t: (pages.append(t), parse(t))[1]
+        try:
+            t0 = time.time()
+            got = S.carscom_history(b, todo)
+            print(f"== cars.com vehicle history: asked for {len(todo)} listing pages, read {len(got)} in {time.time() - t0:.0f}s")
+            for (lid, data), t in zip(got.items(), pages):
+                box = re.search(r".{0,40}Reported by.{0,260}", visible(t))
+                print(f"   {lid[:8]}: {data} | {len(t)} chars, block markers {markers(t[:20000])} | {box.group(0) if box else visible(t)[:200]!r}")
+            if pages:
+                save("carscom-listing-browser.html", pages[0])
+        except Exception as e:
+            print(f"== cars.com vehicle history: {type(e).__name__}: {str(e)[:300]}")
+        finally:
+            S.carscom_history_parse = parse
         pg = b.page()
         try:
             pg.goto("https://www.carmax.com/cars/toyota", timeout=60000)
             pg.wait_for_timeout(4000)
             for mdl in models:
                 for slug in S.slugs(mdl.carmax):
-                    api = (f'/cars/api/search/run?uri=/cars/{slug}&skip=0&take=100&zipCode={s["origin_zip"]}'
-                           f'&radius={s["radius_miles"]}&shipping=-1&sort=price-asc')
-                    status, body = pg.evaluate("async (u) => { const r = await fetch(u); return [r.status, await r.text()] }", api)
                     try:
-                        d = json.loads(body)
-                    except ValueError:
-                        d = {}
-                    items = d.get("items") or []
-                    names = Counter(f'{c.get("make")} {c.get("model")}' for c in items)
-                    ours = sum(1 for c in items if mdl.matches(f'{c.get("make")} {c.get("model")} {c.get("trim") or ""}'))
-                    print(f"== carmax {slug}: HTTP {status}, {len(items)} cars (site says {d.get('totalCount')}), "
-                          f"{ours} are a {mdl.model}; models {dict(names.most_common(4))}")
-                    if items and not ours:
-                        print("   first car:", json.dumps({k: items[0].get(k) for k in ("year", "make", "model", "trim", "engineType", "fuelType", "mpgCity")}))
-                    pg.wait_for_timeout(800)
+                        items = S.carmax_search(pg, s, mdl, slug)
+                        names = Counter(f'{c.get("year")} {c.get("make")} {c.get("model")}' for c in items)
+                        prices = sorted(c.get("basePrice") or 0 for c in items)
+                        print(f"== carmax {slug}: {len(items)} are a {mdl.model}; prices {prices[0] if prices else None} to "
+                              f"{prices[-1] if prices else None}; {dict(names.most_common(6))}")
+                    except Exception as e:
+                        print(f"== carmax {slug}: {type(e).__name__}: {str(e)[:200]}")
         except Exception as e:
             print(f"== carmax: {type(e).__name__}: {str(e)[:200]}")
         pg.close()
@@ -226,7 +175,8 @@ def browser_checks(s, models):
 def main():
     cfg = load_config()
     s, models = cfg["search"], M.enabled(cfg)
-    for step in (database, lambda: nhtsa(models), lambda: autotrader(s, models), lambda: browser_checks(s, models)):
+    logging.basicConfig(level=logging.INFO, format="   log: %(message)s", stream=sys.stdout)
+    for step in (database, lambda: autotrader(s, models), lambda: browser_checks(s, models)):
         try:
             step()
         except Exception as e:

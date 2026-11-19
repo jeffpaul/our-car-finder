@@ -117,38 +117,126 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
     return out
 
 
-def carscom_history(todo, limit=60, delay=1.5):
-    """Reads the AutoCheck history box (owners, accidents, title) from Cars.com listing pages.
+_HISTORY_LABELS = ("Title", "Accidents", "Owners", "Prior use", "Recalls")
 
-    todo is [(listing id, search page URL)]. Listing pages only load with a search page as the
-    Referer. Stops at the first block so the search scraper isn't put at risk. Returns {id: data};
-    data is {} for listings without a history box.
-    """
-    q, out = http(), {}
-    for n, (lid, ref) in enumerate(todo[:limit]):
-        if n:
-            time.sleep(delay)
-        try:
-            r = q.get(f"https://www.cars.com/vehicledetail/{lid}/", headers={"Referer": ref}, timeout=40)
-        except Exception as e:
-            log.warning("cars.com history: %s failed: %s", lid, e)
-            continue
-        if r.status_code != 200:
-            log.warning("cars.com history: HTTP %s after %d pages, stopping", r.status_code, n)
-            break
-        stats = {k.strip().lower(): re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", htmlmod.unescape(v))).strip()
-                 for k, v in re.findall(r'<dt class="stat__label">(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>', r.text, re.S)}
-        d = {}
-        if stats.get("owner"):
-            d["owners"] = "1" if stats["owner"] == "1" else "2+"
-        acc = stats.get("accidents", "")
-        if acc.isdigit():
-            d["accidents"] = int(acc)
-        elif acc:
-            d["accidents"] = "reported"  # AutoCheck shows "Reported" without a count
-        if stats.get("title"):
-            d["title_status"] = stats["title"]
-        out[lid] = d
+
+def carscom_history_parse(page):
+    """Vehicle history (AutoCheck) from a Cars.com listing page, as
+    {"owners", "accidents", "title_status", "prior_use"} with whatever the page gives; {} when the
+    listing has no history report.
+
+    The page states it twice: as true/false fields in its tracking data, and as a "History" box
+    (Title: Clean title, Accidents: No accidents or damage reported, Owners: 1 owner, Prior use: …).
+    The box says more, so it is read first and the fields fill in what it leaves out."""
+    data = htmlmod.unescape(page)
+
+    def field(name):
+        m = re.search(r'"%s"\s*:\s*(true|false)\b' % name, data)
+        return None if not m else m.group(1) == "true"
+
+    text = re.sub(r"\s+", " ", htmlmod.unescape(re.sub(r"<(script|style)[^>]*>.*?</\1>|<[^>]+>", " ", page, flags=re.S)))
+    box = re.search(r"Reported by (?:Experian )?AutoCheck (.{0,500})", text)
+    box = re.split(r"Get the AutoCheck Report|Seller's notes", box.group(1))[0] if box else ""
+    parts = re.split(r"\b(%s) " % "|".join(_HISTORY_LABELS), box)
+    stats = {parts[i].lower(): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
+    if not stats and not re.search(r'"vhr_source"\s*:\s*"[a-z]', data):
+        return {}
+    d = {}
+    owners = re.search(r"(\d+)\+? owner", stats.get("owners", ""), re.I)
+    if owners:
+        d["owners"] = "1" if owners.group(1) == "1" else "2+"
+    elif field("single_owner") is not None:
+        d["owners"] = "1" if field("single_owner") else "2+"
+    acc = stats.get("accidents", "")
+    count = re.search(r"(\d+) accident", acc, re.I)
+    if re.match(r"no accident", acc, re.I) or (not acc and field("no_accidents")):
+        d["accidents"] = 0
+    elif count:
+        d["accidents"] = int(count.group(1))
+    elif acc or field("no_accidents") is False:
+        d["accidents"] = "reported"  # stated without a count
+    title = stats.get("title", "")
+    if re.search(r"\bclean\b", title, re.I) or (not title and field("clean_title")):
+        d["title_status"] = "Clean"
+    elif title or field("clean_title") is False:
+        brand = re.search(r"salvage|rebuilt|flood|lemon|junk|lien", title, re.I)
+        d["title_status"] = brand.group(0).capitalize() if brand else "Branded"
+    use = stats.get("prior use", "")
+    if re.search(r"non-?personal|rental|fleet|commercial", use, re.I) or (not use and field("personal_use_only") is False):
+        d["prior_use"] = "non-personal use"
+    elif re.search(r"personal", use, re.I) or (not use and field("personal_use_only")):
+        d["prior_use"] = "personal use"
+    return d
+
+
+def _carscom_blocked(status, text):
+    return status != 200 or "Just a moment" in text[:4000] or "cf-chl" in text[:20000]
+
+
+def _carscom_open(pg, url, ref):
+    """Opens a listing page the way a shopper would and returns its HTML, or None if refused."""
+    for attempt in range(2):
+        if attempt:  # refused: look at the search results again, then retry once
+            pg.goto(ref, timeout=60000, wait_until="domcontentloaded")
+            pg.wait_for_timeout(4000)
+        resp = pg.goto(url, timeout=60000, referer=ref, wait_until="domcontentloaded")
+        if resp is not None and resp.status in (404, 410):
+            return ""  # the listing is gone
+        for _ in range(15):  # a "Just a moment..." check can clear by itself within a few seconds
+            pg.wait_for_timeout(1000)
+            text = pg.content()
+            if "Just a moment" not in pg.title() and "cf-chl" not in text[:20000]:
+                if resp is None or resp.status in (200, 403):  # 403 is the check page that then cleared
+                    return text
+    return None
+
+
+def carscom_history(browser, todo, limit=60, delay=1.0):
+    """Reads the vehicle history from Cars.com listing pages.
+
+    todo is [(listing id, search page URL)]. Listing pages refuse plain requests (a Cloudflare
+    check), so they are read in the stealth browser: first by asking for the page from inside a
+    search results page, which is quick; if that is refused, by opening each listing. Stops after
+    two refusals in a row so the search scraper isn't put at risk. Returns {id: data}; data is {}
+    for listings without a history report."""
+    out, refused, quick = {}, 0, True
+    if not todo:
+        return out
+    pg = browser.page()
+    try:
+        pg.goto(todo[0][1], timeout=60000, wait_until="domcontentloaded")
+        pg.wait_for_timeout(4000)
+        for n, (lid, ref) in enumerate(todo[:limit]):
+            url, text = f"https://www.cars.com/vehicledetail/{lid}/", None
+            try:
+                if quick:
+                    status, body = pg.evaluate(
+                        "async ([u, ref]) => { const r = await fetch(u, {referrer: ref, credentials: 'include'});"
+                        " return [r.status, await r.text()] }", [url, ref])
+                    if status in (404, 410):
+                        text = ""  # the listing is gone
+                    elif _carscom_blocked(status, body):
+                        log.info("cars.com history: quick request refused (HTTP %s), opening pages instead", status)
+                        quick = False
+                    else:
+                        text = body
+                if text is None:
+                    text = _carscom_open(pg, url, ref)
+            except Exception as e:
+                log.warning("cars.com history: %s failed: %s", lid, str(e)[:200])
+            if text is None:
+                refused += 1
+                if refused >= 2:
+                    log.warning("cars.com history: refused twice in a row after %d pages, stopping", len(out))
+                    break
+                continue
+            refused = 0
+            out[lid] = carscom_history_parse(text)
+            pg.wait_for_timeout(int(delay * 1000))
+    finally:
+        pg.close()
+    log.info("cars.com history: read %d listing pages (%s), %d with a history report",
+             len(out), "quick requests" if quick else "opened one by one", sum(1 for d in out.values() if d))
     return out
 
 
@@ -235,6 +323,30 @@ class Browser:
         return self.b.new_page()
 
 
+CARMAX_MAX_PAGES = 8
+
+
+def carmax_search(pg, s, mdl, slug):
+    """Every car of this model in a CarMax search, 100 at a time. pg is a page already on carmax.com.
+
+    A slug can be a model ("jeep/wrangler-4xe") or just a make ("hyundai"), for models CarMax has no
+    address for; a make search returns every model, so only cars matching the model are kept."""
+    out = []
+    for skip in range(0, 100 * CARMAX_MAX_PAGES, 100):
+        api = (f'/cars/api/search/run?uri=/cars/{slug}'
+               f'&skip={skip}&take=100&zipCode={s["origin_zip"]}&radius={s["radius_miles"]}&shipping=-1&sort=price-asc')
+        status, body = pg.evaluate("async (u) => { const r = await fetch(u); return [r.status, await r.text()] }", api)
+        if status != 200:
+            raise RuntimeError(f"CarMax API returned HTTP {status} for {slug}")
+        data = json.loads(body)
+        page = data.get("items") or []
+        out += [c for c in page if mdl.matches(f'{c.get("make")} {c.get("model")} {c.get("trim") or ""}')]
+        pg.wait_for_timeout(800)
+        if len(page) < 100 or skip + len(page) >= (data.get("totalCount") or 0):
+            break
+    return out
+
+
 def carmax(cfg, models, browser):
     s = cfg["search"]
     items = []
@@ -242,19 +354,17 @@ def carmax(cfg, models, browser):
     try:
         pg.goto("https://www.carmax.com/cars/toyota", timeout=60000)
         pg.wait_for_timeout(4000)
-        for slug in (sl for mdl in models for sl in slugs(mdl.carmax)):
-            api = (f'/cars/api/search/run?uri=/cars/{slug}'
-                   f'&skip=0&take=100&zipCode={s["origin_zip"]}&radius={s["radius_miles"]}&shipping=-1&sort=price-asc')
-            status, body = pg.evaluate("async (u) => { const r = await fetch(u); return [r.status, await r.text()] }", api)
-            if status != 200:
-                raise RuntimeError(f"CarMax API returned HTTP {status} for {slug}")
-            items += json.loads(body).get("items", [])
-            pg.wait_for_timeout(800)
+        for mdl in models:
+            for slug in slugs(mdl.carmax):
+                items += carmax_search(pg, s, mdl, slug)
     finally:
         pg.close()
-    out = []
+    out, seen = [], set()
     for c in items:
         stock = c.get("stockNumber")
+        if stock in seen:
+            continue
+        seen.add(stock)
         out.append(blank(
             "CarMax", stock, url=f"https://www.carmax.com/car/{stock}",
             title=f'{c.get("year")} {c.get("make")} {c.get("model")} {c.get("trim") or ""}'.strip(),
@@ -340,6 +450,11 @@ def _name(v):
     return v.get("name") if isinstance(v, dict) else (v if isinstance(v, str) else None)
 
 
+def _at_title(it):
+    """A listing's title; some sponsored listings only fill in the long one."""
+    return next((it[k] for k in ("title", "titleLong") if isinstance(it.get(k), str) and it[k].strip()), "")
+
+
 def _squash(text):
     return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
 
@@ -351,7 +466,7 @@ def _autotrader_is(mdl, slug, it):
     type is plug-in hybrid, and its title may just say "Toyota RAV4 SE". So a slug that filters by
     fuel (…?fuelTypeGroup=PIH) accepts any plug-in hybrid of the slug's model. Each listing is still
     checked, because the page mixes in sponsored cars that ignore the filters."""
-    title = it.get("title") if isinstance(it.get("title"), str) else ""
+    title = _at_title(it)
     if mdl.matches(" ".join(filter(None, [_name(it.get("model")), _name(it.get("trim")), title]))):
         return True
     path, _, extra = slug.partition("?")
@@ -395,7 +510,7 @@ def _autotrader_model(s, mdl, client, seen, slug, pages=AUTOTRADER_MAX_PAGES):
             seen.add(lid)
             new += 1
             trim = _name(it.get("trim"))
-            title = re.sub(r"^(?:Used|Certified|New)\s+", "", it.get("title") if isinstance(it.get("title"), str) else "")
+            title = re.sub(r"^(?:Used|Certified|New)\s+", "", _at_title(it))
             if not mdl.matches(title):  # later steps identify the model from the title alone
                 title = " ".join(str(p) for p in (it.get("year"), mdl.make, mdl.model, trim) if p)
             own = owners.get(str(it.get("ownerId"))) or (it.get("owner") if isinstance(it.get("owner"), dict) else {})
