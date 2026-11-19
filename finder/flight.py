@@ -3,8 +3,11 @@
 Autotrader and KBB used to put everything in one <script id="__NEXT_DATA__"> JSON block. They now
 stream it as  self.__next_f.push([1, "<escaped text>"])  calls. Joined together, that text is a
 list of rows ("<hex id>:<json>"), where a value that appears more than once can be replaced by a
-"$<row id>" reference. Rather than depend on where the listings sit in that tree, this finds every
-JSON object that looks like a listing: a 17-character VIN plus a price, title or year.
+"$<row id>" or "$<row id>:<key>:<key>" reference (the second form points inside a row).
+
+Autotrader keeps its search results under props.pageData in one of those rows. If that ever moves,
+page_data() falls back to finding every JSON object that looks like a listing: a 17-character VIN
+plus a price, title or year.
 """
 import json
 import re
@@ -13,7 +16,7 @@ _DEC = json.JSONDecoder()
 _PUSH = "self.__next_f.push([1,"
 _VIN = re.compile(r'"vin":\s*"[A-HJ-NPR-Z0-9]{17}"')
 _ROW = re.compile(r"(?m)^([0-9a-f]{1,6}):")
-_REF = re.compile(r"\$([0-9a-f]{1,6})")
+_REF = re.compile(r"\$([0-9a-f]{1,6})((?::[^:]+)*)")
 
 
 def flight_text(page):
@@ -41,13 +44,33 @@ def rows(text):
     return out
 
 
+def _follow(ref, table):
+    """What a "$id" or "$id:key:key" reference points at; the reference itself if it leads nowhere."""
+    m = _REF.fullmatch(ref)
+    if not m or m.group(1) not in table:
+        return ref
+    v = table[m.group(1)]
+    for key in m.group(2).split(":")[1:]:
+        if isinstance(v, dict) and key in v:
+            v = v[key]
+        elif isinstance(v, list) and key.isdigit() and int(key) < len(v):
+            v = v[int(key)]
+        else:
+            return ref
+    return v
+
+
 def deref(v, table, depth=4):
-    """Replaces "$id" references with the rows they point at, a few levels deep."""
+    """Replaces references with what they point at, a few levels deep."""
     if depth < 0:
         return v
     if isinstance(v, str):
-        m = _REF.fullmatch(v)
-        return deref(table[m.group(1)], table, depth - 1) if m and m.group(1) in table else v
+        if not v.startswith("$"):
+            return v
+        if v.startswith("$$"):  # a plain string that begins with a dollar sign, e.g. "$$25,000"
+            return v[1:]
+        target = _follow(v, table)
+        return target if target is v else deref(target, table, depth - 1)
     if isinstance(v, dict):
         return {k: deref(x, table, depth - 1) for k, x in v.items()}
     if isinstance(v, list):
@@ -122,9 +145,19 @@ def page_data(page):
     if not text:
         return None
     table = rows(text)
+    for row in table.values():
+        try:
+            data = row["props"]["pageData"]
+            inv = deref(data["inventory"], table, 1)
+        except (KeyError, TypeError):
+            continue
+        if isinstance(inv, dict):
+            own = deref(data.get("owners"), table, 1)
+            return {"inventory": {str(k): deref(v, table, 4) for k, v in inv.items() if isinstance(deref(v, table, 0), dict)},
+                    "owners": {str(k): deref(v, table, 4) for k, v in own.items()} if isinstance(own, dict) else {}}
     inventory = {}
     for raw in listing_objects(text):
-        it = deref(raw, table, 3)
+        it = deref(raw, table, 4)
         it.setdefault("vin", _own_vin(raw))
         lid = str(it.get("id") or it.get("listingId") or it["vin"])
         if lid not in inventory or len(it) > len(inventory[lid]):

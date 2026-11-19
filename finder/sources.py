@@ -66,9 +66,15 @@ def carscom(cfg, models):
     return out
 
 
+CARSCOM_MAX_PAGES = 20
+
+
 def _carscom_model(s, q, mdl, seen, market_band, slug):
     out = []
-    for page in range(1, 6):
+    # The site serves about 24 cars a page whatever page_size asks for, cheapest first.
+    for page in range(1, CARSCOM_MAX_PAGES + 1):
+        if page > 1:
+            time.sleep(1)
         params = {
             "makes[]": mdl.make.lower(), "models[]": slug,
             "maximum_distance": s["radius_miles"], "zip": s["origin_zip"], "stock_type": "used",
@@ -331,7 +337,30 @@ class _AutotraderClient:
 
 def _name(v):
     """Autotrader gives trim and model as {"name": ...}; tolerate a plain string too."""
-    return v.get("name") if isinstance(v, dict) else v
+    return v.get("name") if isinstance(v, dict) else (v if isinstance(v, str) else None)
+
+
+def _squash(text):
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+def _autotrader_is(mdl, slug, it):
+    """Whether an Autotrader listing is this model.
+
+    Autotrader has no separate model for most plug-in hybrids: a RAV4 Prime is a "RAV4" whose fuel
+    type is plug-in hybrid, and its title may just say "Toyota RAV4 SE". So a slug that filters by
+    fuel (…?fuelTypeGroup=PIH) accepts any plug-in hybrid of the slug's model. Each listing is still
+    checked, because the page mixes in sponsored cars that ignore the filters."""
+    title = it.get("title") if isinstance(it.get("title"), str) else ""
+    if mdl.matches(" ".join(filter(None, [_name(it.get("model")), _name(it.get("trim")), title]))):
+        return True
+    path, _, extra = slug.partition("?")
+    if "fuelTypeGroup=PIH" not in extra:
+        return False
+    fuel = it.get("fuelType")
+    fuel = " ".join(str(x) for x in fuel.values()) if isinstance(fuel, dict) else str(fuel or "")
+    base = _squash(path.split("/")[-1])
+    return "plug" in fuel.lower() and (_squash(_name(it.get("model"))).startswith(base) or base in _squash(title))
 
 
 def autotrader(cfg, models):
@@ -344,25 +373,29 @@ def autotrader(cfg, models):
     return out
 
 
-def _autotrader_model(s, mdl, client, seen, slug):
+AUTOTRADER_MAX_PAGES = 8
+
+
+def _autotrader_model(s, mdl, client, seen, slug, pages=AUTOTRADER_MAX_PAGES):
     out = []
-    for first in (0, 25, 50, 75):
+    for first in range(0, 25 * pages, 25):
         params = {
             "zip": s["origin_zip"], "searchRadius": s["radius_miles"], "startYear": s["min_year"],
             "maxPrice": s["price_max"] + s["near_miss_margin"], "maxMileage": s["max_mileage"],
             "sortBy": "derivedpriceASC", "numRecords": 25, "firstRecord": first,
         }
+        if first:
+            time.sleep(2)
         eggs = client.eggs(slug, params)
         owners = eggs.get("owners") or {}
         new = 0
         for lid, it in (eggs.get("inventory") or {}).items():
-            trim = _name(it.get("trim"))
-            title = (it.get("title") or "").replace("Used ", "", 1)
-            # Plug-in versions may carry "4xe"/"Prime"/"Plug-in" in the trim or title, not the model name.
-            if lid in seen or not mdl.matches(" ".join(filter(None, [_name(it.get("model")), trim, title]))):
+            if lid in seen or not isinstance(it, dict) or it.get("listingType") == "NEW" or not _autotrader_is(mdl, slug, it):
                 continue
             seen.add(lid)
             new += 1
+            trim = _name(it.get("trim"))
+            title = re.sub(r"^(?:Used|Certified|New)\s+", "", it.get("title") if isinstance(it.get("title"), str) else "")
             if not mdl.matches(title):  # later steps identify the model from the title alone
                 title = " ".join(str(p) for p in (it.get("year"), mdl.make, mdl.model, trim) if p)
             own = owners.get(str(it.get("ownerId"))) or (it.get("owner") if isinstance(it.get("owner"), dict) else {})

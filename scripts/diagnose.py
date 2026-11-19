@@ -3,7 +3,7 @@
 
     .venv/bin/python scripts/diagnose.py
 
-Makes spaced-out requests (two to three minutes in total), changes nothing in the database and
+Makes spaced-out requests (three to four minutes in total), changes nothing in the database and
 sends no notifications. Paste the output to whoever is fixing the scraper. The pages it looked at
 are also saved in out/debug/ in case they are asked for.
 """
@@ -13,33 +13,24 @@ import re
 import sqlite3
 import sys
 import time
+from collections import Counter
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from curl_cffi import requests  # noqa: E402
 
-from finder import flight  # noqa: E402
 from finder import models as M  # noqa: E402
 from finder import sources as S  # noqa: E402
 from finder.config import load_config  # noqa: E402
 from finder.reliability import NHTSA_NAMES  # noqa: E402
 
 DEBUG = ROOT / "out/debug"
-
-# Other ways each plug-in model might be reachable on Autotrader, tried after the slugs in
-# finder/models.py. "PIH" is Autotrader's code for plug-in hybrid.
-AUTOTRADER_CANDIDATES = {
-    "wrangler4xe": ["jeep/wrangler?fuelTypeGroup=PIH"],
-    "grandcherokee4xe": ["jeep/grand-cherokee?fuelTypeGroup=PIH"],
-    "outlanderphev": ["mitsubishi/outlander?fuelTypeGroup=PIH"],
-    "tucsonphev": ["hyundai/tucson?fuelTypeGroup=PIH"],
-    "rav4prime": ["toyota/rav4?fuelTypeGroup=PIH"],
-}
-BLOCK_MARKERS = ["captcha-delivery", "datadome", "px-captcha", "perimeterx", "cf-chl", "cloudflare", "akamai",
-                 "incapsula", "Access Denied", "unusual activity", "captcha"]
+BLOCK_MARKERS = ["captcha-delivery", "datadome", "px-captcha", "perimeterx", "cf-chl", "just a moment", "akamai",
+                 "incapsula", "access denied", "unusual activity"]
+HISTORY_WORDS = r"accident|owner|title|autocheck|carfax|personal.?use|history|damage"
 
 
 def save(name, text):
@@ -47,17 +38,19 @@ def save(name, text):
     (DEBUG / name).write_text(text)
 
 
-def short(v, depth=0):
-    """A value cut down to its shape, for printing."""
-    if isinstance(v, str):
-        return v if len(v) <= 70 else v[:70] + "…"
-    if isinstance(v, list):
-        return [short(x, depth + 1) for x in v[:2]] + ([f"…{len(v) - 2} more"] if len(v) > 2 else [])
-    if isinstance(v, dict):
-        if depth >= 4:
-            return f"{{…{len(v)} keys}}"
-        return {k: short(x, depth + 1) for k, x in list(v.items())[:45]}
-    return v
+def squeeze(text, n=None):
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if n is None else text[:n]
+
+
+def visible(page):
+    """A page's text without scripts, styles and tags."""
+    return squeeze(html.unescape(re.sub(r"<(script|style)[^>]*>.*?</\1>|<[^>]+>", " ", page, flags=re.S)))
+
+
+def markers(page):
+    low = page.lower()
+    return {k: low.count(k) for k in BLOCK_MARKERS if k in low}
 
 
 def database():
@@ -69,12 +62,11 @@ def database():
     for label, sql in [
         ("sources (name, failures in a row, listings last time, last error)",
          "SELECT source, failures, last_count, substr(coalesce(last_error, ''), 1, 100) FROM source_health"),
-        ("price observations (model, oldest year, newest year, count)",
-         "SELECT model_key, min(year), max(year), count(*) FROM market GROUP BY 1"),
+        ("price observations (model, count)", "SELECT model_key, count(*) FROM market GROUP BY 1"),
         ("NHTSA (model, year, complaints, recalls)",
          "SELECT model_key, year, complaints, recalls FROM reliability ORDER BY 1, 2"),
-        ("active listings (model, in budget or near miss, count)",
-         "SELECT json_extract(data, '$.model'), json_extract(data, '$.tier'), count(*) FROM listings "
+        ("active listings (site, model, count)",
+         "SELECT json_extract(data, '$.source'), json_extract(data, '$.model'), count(*) FROM listings "
          "WHERE gone_on IS NULL GROUP BY 1, 2"),
         ("history filled in (source of history, count)",
          "SELECT json_extract(data, '$.history_source'), count(*) FROM listings WHERE gone_on IS NULL GROUP BY 1"),
@@ -86,151 +78,155 @@ def database():
 
 
 def nhtsa(models):
-    """The model names NHTSA files complaints under, next to the names this tool asks for."""
+    """Complaint and recall counts for 2023 under each name the tool asks NHTSA for."""
     q = requests.Session(impersonate="chrome")
-    for make in sorted({m.make for m in models}):
-        words = {m.model.split()[0].upper() for m in models if m.make == make}
-        asked = sorted(NHTSA_NAMES.get(m.key, m.model.upper()) for m in models if m.make == make)
-        for issue in ("c", "r"):
+    for mdl in models:
+        names = NHTSA_NAMES.get(mdl.key, mdl.model.upper())
+        for name in (names,) if isinstance(names, str) else names:
             try:
-                r = q.get("https://api.nhtsa.gov/products/vehicle/models",
-                          params={"modelYear": 2023, "make": make, "issueType": issue}, timeout=30).json()
-                names = sorted({x.get("model", "") for x in r.get("results", [])})
-                print(f"== nhtsa {make} 2023 {'complaints' if issue == 'c' else 'recalls'}: we ask for {asked}; "
-                      f"NHTSA has {[n for n in names if any(w in n.upper() for w in words)]}")
+                p = {"make": mdl.make, "model": name, "modelYear": 2023}
+                c = q.get("https://api.nhtsa.gov/complaints/complaintsByVehicle", params=p, timeout=30).json()
+                r = q.get("https://api.nhtsa.gov/recalls/recallsByVehicle", params=p, timeout=30).json()
+                print(f"== nhtsa 2023 {mdl.make} {name!r}: {len(c.get('results', []))} complaints, {len(r.get('results', []))} recalls")
             except Exception as e:
-                print(f"== nhtsa {make}: {type(e).__name__}: {str(e)[:100]}")
+                print(f"== nhtsa 2023 {mdl.make} {name!r}: {type(e).__name__}: {str(e)[:100]}")
             time.sleep(1)
 
 
-def carscom_search(q, s, mdl, slug):
-    p = {"makes[]": mdl.make.lower(), "models[]": slug, "maximum_distance": s["radius_miles"],
-         "zip": s["origin_zip"], "stock_type": "used", "page_size": 100, "page": 1}
-    r = q.get("https://www.cars.com/shopping/results/?" + urlencode(p), timeout=40)
-    blobs = [json.loads(html.unescape(b)) for b in re.findall(r'data-vehicle-details="([^"]+)"', r.text)]
-    return r, blobs
-
-
-def carscom(s, models):
-    q = requests.Session(impersonate="chrome")
-    first, refused = None, []
-    for mdl in models:
-        for slug in slugs(mdl.carscom):
-            try:
-                r, blobs = carscom_search(q, s, mdl, slug)
-                years = sorted({str(b.get("year")) for b in blobs})
-                names = sorted({str(b.get("model")) for b in blobs})[:4]
-                print(f"== cars.com search {slug}: HTTP {r.status_code}, {len(blobs)} on page 1, years {years}, models {names}")
-                if r.status_code != 200:
-                    refused.append((mdl, slug))
-                if blobs and not first:
-                    first = (blobs[0]["listingId"], r.url)
-            except Exception as e:
-                print(f"== cars.com search {slug}: {type(e).__name__}: {str(e)[:100]}")
-            time.sleep(2)
-    for mdl, slug in refused:  # refused once: a one-off, or does the site not know this name?
-        r, blobs = carscom_search(q, s, mdl, slug)
-        print(f"== cars.com search {slug}, second try: HTTP {r.status_code}, {len(blobs)} on page 1")
-        time.sleep(2)
-    if not first:
-        return
-    lid, ref = first
-    url = f"https://www.cars.com/vehicledetail/{lid}/"
-    try:
-        r = requests.Session(impersonate="chrome").get(url, headers={"Referer": ref}, timeout=40)
-        t = r.text
-        title = re.search(r"<title>(.*?)</title>", t, re.S)
-        save("carscom-listing.html", t)
-        print(f"== cars.com listing page (plain request): HTTP {r.status_code}, {len(t)} chars, "
-              f"title {title.group(1).strip()[:70] if title else None!r}, history box {'stat__label' in t}")
-        print("   block markers:", {k: t.lower().count(k.lower()) for k in BLOCK_MARKERS if k.lower() in t.lower()})
-        print("   script sources:", sorted(set(re.findall(r'<script[^>]*\bsrc="([^"?]+)', t)))[:6])
-        print("   text:", re.sub(r"\s+", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>|<[^>]+>", " ", t, flags=re.S)).strip()[:300])
-    except Exception as e:
-        print(f"== cars.com listing page (plain request): {type(e).__name__}: {str(e)[:100]}")
-    time.sleep(3)
-    # The same page in the stealth browser that already handles CarMax and Facebook.
-    try:
-        with S.Browser() as b:
-            pg = b.page()
-            pg.goto(ref, timeout=60000)
-            pg.wait_for_timeout(4000)
-            resp = pg.goto(url, timeout=60000, referer=ref)
-            pg.wait_for_timeout(5000)
-            t = pg.content()
-            save("carscom-listing-browser.html", t)
-            stats = re.findall(r'<dt class="stat__label">(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>', t, re.S)
-            stats = [(re.sub(r"<[^>]+>", "", k).strip(), re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", v)).strip()) for k, v in stats]
-            print(f"== cars.com listing page (stealth browser): HTTP {resp.status if resp else None}, {len(t)} chars, "
-                  f"title {pg.title()[:70]!r}, history box {'stat__label' in t}, mentions AutoCheck {'AutoCheck' in t}")
-            print("   history stats:", stats[:8])
-            pg.close()
-    except Exception as e:
-        print(f"== cars.com listing page (stealth browser): {type(e).__name__}: {str(e)[:200]}")
-
-
-def autotrader_fetch(q, s, slug, first=0):
-    path, _, extra = slug.partition("?")
-    params = {"zip": s["origin_zip"], "searchRadius": s["radius_miles"], "startYear": s["min_year"],
-              "maxPrice": s["price_max"] + s["near_miss_margin"], "maxMileage": s["max_mileage"],
-              "sortBy": "derivedpriceASC", "numRecords": 25, "firstRecord": first, **dict(parse_qsl(extra))}
-    r = q.get(f"https://www.autotrader.com/cars-for-sale/used-cars/{path}?{urlencode(params)}", timeout=40)
-    return r, S.autotrader_page_data(r.text)
-
-
 def autotrader(s, models):
-    q = requests.Session(impersonate="chrome")
-    shown_raw = False
+    """Runs the real Autotrader scraper on the first two pages of each model."""
+    client, seen, shown_raw = S._AutotraderClient(), set(), False
+    fetch, pages = client.eggs, []
+    client.eggs = lambda slug, params: (pages.append(fetch(slug, params)), pages[-1])[1]
     for mdl in models:
-        for slug in list(slugs(mdl.autotrader)) + AUTOTRADER_CANDIDATES.get(mdl.key, []):
+        for slug in S.slugs(mdl.autotrader):
+            del pages[:]
             try:
-                r, data = autotrader_fetch(q, s, slug)
+                rows = S._autotrader_model(s, mdl, client, seen, slug, pages=2)
             except Exception as e:
-                print(f"== autotrader {slug}: {type(e).__name__}: {str(e)[:100]}")
+                print(f"== autotrader {slug}: {type(e).__name__}: {str(e)[:300]}")
                 continue
-            title = re.search(r"<title>(.*?)</title>", r.text, re.S)
-            inv = (data or {}).get("inventory") or {}
-            rows = []
-            for it in inv.values():
-                text = " ".join(str(x) for x in (S._name(it.get("model")), S._name(it.get("trim")), it.get("title")) if x)
-                rows.append((mdl.matches(text), it))
-            hits = [it for ok, it in rows if ok]
-            print(f"== autotrader {slug}: HTTP {r.status_code}, title {title.group(1).strip()[:60] if title else None!r}")
-            print(f"   landed on {str(r.url).split('?')[0][-70:]}; page data {'found' if data is not None else 'MISSING'}; "
-                  f"{len(inv)} listings, {len(hits)} are a {mdl.model}; owners {len((data or {}).get('owners') or {})}")
-            print("   titles:", [str(it.get("title"))[:50] for _, it in rows[:4]])
-            if hits:
-                print("   years", sorted({str(it.get("year")) for it in hits}), "fuel", sorted({str(it.get("fuelType"))[:40] for it in hits})[:3])
-            if inv and not shown_raw:
+            raw = {lid: it for p in pages for lid, it in (p.get("inventory") or {}).items() if isinstance(it, dict)}
+            kinds = Counter(str(it.get("listingType")) for it in raw.values())
+            print(f"== autotrader {slug}: {len(pages)} pages, {len(raw)} listings on them {dict(kinds)}, {len(rows)} kept as a {mdl.model}")
+            have = {k: sum(1 for r in rows if r.get(k)) for k in ("price", "mileage", "vin", "kbb", "deal_indicator", "city", "lat", "seller", "image_url")}
+            prices = sorted(r["price"] for r in rows if r["price"])
+            print(f"   filled in: {have}; years {sorted({r['year'] for r in rows if r['year']})}; "
+                  f"prices {prices[0] if prices else None} to {prices[-1] if prices else None}; private sellers {sum(r['private'] for r in rows)}")
+            for r in rows[:3]:
+                print("   KEPT:", json.dumps({k: r[k] for k in ("title", "year", "trim", "price", "mileage", "kbb", "deal_indicator", "seller", "city", "zip", "vin")}, ensure_ascii=False))
+            kept = {r["id"] for r in rows}
+            left = [it for lid, it in raw.items() if lid not in kept and it.get("listingType") != "NEW"]
+            print("   LEFT OUT (not new cars):", [(str(it.get("title"))[:45], S._name(it.get("model")), str(it.get("fuelType"))[:45]) for it in left[:5]])
+            if raw and not shown_raw:
                 shown_raw = True
-                save("autotrader.html", r.text)
-                it = next(iter(inv.values()))
-                print("   RAW LISTING:", json.dumps(short(it), ensure_ascii=False))
-                own = ((data or {}).get("owners") or {}).get(str(it.get("ownerId")))
-                print("   RAW OWNER:", json.dumps(short(own), ensure_ascii=False))
-                text = flight.flight_text(r.text)
-                for word in ("fuelTypeGroup", "PIH", "firstRecord", "numRecords", "totalResultCount", "4xe"):
-                    found = sorted({m.group(0) for m in re.finditer(r".{0,70}" + re.escape(word) + r".{0,90}", text)})[:2]
-                    print(f"   near {word!r}:", found)
-                time.sleep(3)
-                r2, d2 = autotrader_fetch(q, s, slug, first=25)
-                ids2 = set(((d2 or {}).get("inventory") or {}))
-                print(f"   second page: {len(ids2)} listings, {len(ids2 & set(inv))} repeated from the first page")
-            if data is None:
-                save(f"autotrader-{mdl.key}.html", r.text)
-                t = r.text
-                print("   block markers:", {k: t.lower().count(k.lower()) for k in BLOCK_MARKERS if k.lower() in t.lower()})
+                it = raw.get(rows[0]["id"]) if rows else next(iter(raw.values()))
+                print("   RAW KEYS:", sorted(it))
+                for k in ("pricingDetail", "mileage", "title", "trim", "model", "year", "fuelType", "listingType", "vin", "price"):
+                    print(f"   RAW {k}:", json.dumps(it.get(k), ensure_ascii=False)[:400])
             time.sleep(3)
 
 
-def slugs(v):
-    return S.slugs(v)
+def carscom_ids(s, mdl):
+    """A few listing ids from the first Cars.com results page of a model, and that page's address."""
+    q = requests.Session(impersonate="chrome")
+    p = {"makes[]": mdl.make.lower(), "models[]": S.slugs(mdl.carscom)[0], "maximum_distance": s["radius_miles"],
+         "zip": s["origin_zip"], "stock_type": "used", "page_size": 100, "page": 1}
+    url = "https://www.cars.com/shopping/results/?" + urlencode(p)
+    r = q.get(url, timeout=40)
+    if r.status_code == 403:
+        time.sleep(5)
+        r = q.get(url, timeout=40)
+    blobs = [json.loads(html.unescape(b)) for b in re.findall(r'data-vehicle-details="([^"]+)"', r.text)]
+    print(f"== cars.com search: HTTP {r.status_code}, {len(blobs)} cars on the page")
+    if blobs:
+        print("   search card fields:", json.dumps(blobs[0], ensure_ascii=False)[:900])
+        card = re.search(r'<[^>]+data-vehicle-details=.*?(?=<[^>]+data-vehicle-details=|\Z)', r.text, re.S)
+        print("   search card text:", visible(card.group(0))[:500] if card else None)
+    return [b["listingId"] for b in blobs if b.get("listingId")][:3], str(r.url)
+
+
+def history_report(page):
+    """Prints where a Cars.com listing page keeps the vehicle history, in markup, text and data."""
+    body = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S)
+    text = visible(page)
+    print(f"   'AutoCheck' appears {page.count('AutoCheck')} times in the page, {body.count('AutoCheck')} outside scripts, "
+          f"{text.count('AutoCheck')} in the text; old history box {'stat__label' in page}")
+    for label, src, before, after in (("MARKUP", body, 600, 2400), ("TEXT", text, 300, 900)):
+        hits = [m.start() for m in re.finditer(r"AutoCheck|accidents? reported|No accident|[0-9] owner|1-owner|Clean title", src, re.I)]
+        last, shown = -10000, 0
+        for i in hits:
+            if i - last > after and shown < (1 if label == "MARKUP" else 3):
+                print(f"   {label} near {src[i:i + 20]!r}:", squeeze(src[max(0, i - before):i + after]))
+                last, shown = i, shown + 1
+    facts = re.findall(r'"([A-Za-z_]*(?:' + HISTORY_WORDS + r')[A-Za-z_]*)"\s*:\s*("[^"]{0,60}"|[\w.\-]+)', html.unescape(page), re.I)
+    print("   DATA fields:", sorted(set(facts))[:40])
+    tags = re.findall(r'<([a-z0-9-]+)[^>]*\b(?:class|id|data-[a-z-]+)="([^"]*(?:' + HISTORY_WORDS + r')[^"]*)"', body, re.I)
+    print("   TAGS:", sorted({(t, c[:70]) for t, c in tags})[:40])
+
+
+def browser_checks(s, models):
+    """Cars.com listing pages and CarMax searches, in the stealth browser."""
+    try:
+        ids, ref = carscom_ids(s, models[0])
+    except Exception as e:
+        print(f"== cars.com search: {type(e).__name__}: {str(e)[:150]}")
+        ids, ref = [], None
+    with S.Browser() as b:
+        pg = b.page()
+        for n, lid in enumerate(ids):
+            url = f"https://www.cars.com/vehicledetail/{lid}/"
+            try:
+                t0 = time.time()
+                if n == 0:  # the first one the careful way: search page first, then the listing
+                    pg.goto(ref, timeout=60000)
+                    pg.wait_for_timeout(4000)
+                    resp = pg.goto(url, timeout=60000, referer=ref)
+                    pg.wait_for_timeout(5000)
+                else:  # the rest the quick way, to see whether that is enough
+                    resp = pg.goto(url, timeout=60000, wait_until="domcontentloaded")
+                    pg.wait_for_timeout(1500)
+                t = pg.content()
+                print(f"== cars.com listing {n + 1} ({'via search page' if n == 0 else 'direct'}): HTTP {resp.status if resp else None}, "
+                      f"{time.time() - t0:.0f}s, {len(t)} chars, title {pg.title()[:60]!r}, block markers {markers(t)}")
+                if n == 0:
+                    save("carscom-listing-browser.html", t)
+                    history_report(t)
+                else:
+                    print("   TEXT:", [squeeze(m.group(0)) for m in re.finditer(r".{0,80}(?:AutoCheck|accidents? reported|No accident|[0-9] owner|Clean title).{0,160}", visible(t), re.I)][:3])
+            except Exception as e:
+                print(f"== cars.com listing {n + 1}: {type(e).__name__}: {str(e)[:200]}")
+        pg.close()
+        pg = b.page()
+        try:
+            pg.goto("https://www.carmax.com/cars/toyota", timeout=60000)
+            pg.wait_for_timeout(4000)
+            for mdl in models:
+                for slug in S.slugs(mdl.carmax):
+                    api = (f'/cars/api/search/run?uri=/cars/{slug}&skip=0&take=100&zipCode={s["origin_zip"]}'
+                           f'&radius={s["radius_miles"]}&shipping=-1&sort=price-asc')
+                    status, body = pg.evaluate("async (u) => { const r = await fetch(u); return [r.status, await r.text()] }", api)
+                    try:
+                        d = json.loads(body)
+                    except ValueError:
+                        d = {}
+                    items = d.get("items") or []
+                    names = Counter(f'{c.get("make")} {c.get("model")}' for c in items)
+                    ours = sum(1 for c in items if mdl.matches(f'{c.get("make")} {c.get("model")} {c.get("trim") or ""}'))
+                    print(f"== carmax {slug}: HTTP {status}, {len(items)} cars (site says {d.get('totalCount')}), "
+                          f"{ours} are a {mdl.model}; models {dict(names.most_common(4))}")
+                    if items and not ours:
+                        print("   first car:", json.dumps({k: items[0].get(k) for k in ("year", "make", "model", "trim", "engineType", "fuelType", "mpgCity")}))
+                    pg.wait_for_timeout(800)
+        except Exception as e:
+            print(f"== carmax: {type(e).__name__}: {str(e)[:200]}")
+        pg.close()
 
 
 def main():
     cfg = load_config()
     s, models = cfg["search"], M.enabled(cfg)
-    for step in (database, lambda: nhtsa(models), lambda: carscom(s, models), lambda: autotrader(s, models)):
+    for step in (database, lambda: nhtsa(models), lambda: autotrader(s, models), lambda: browser_checks(s, models)):
         try:
             step()
         except Exception as e:
