@@ -72,6 +72,7 @@ def listings_block(db):
             f'owners {x["owners"]}' if x.get("owners") else "",
             f'accidents {x["accidents"]}' if x.get("accidents") is not None else "",
             f'title {x["title_status"]}' if x.get("title_status") else "",
+            f'prior use: {x["prior_use"]}' if x.get("prior_use") else "",
             f'seller {x.get("seller")}' + (" (private)" if x.get("private") else "") if x.get("seller") else "",
             f'mentions: {", ".join(x["flags"])}' if x.get("flags") else "",
             f'VIN {x["vin"]}' if x.get("vin") else "",
