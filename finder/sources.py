@@ -529,7 +529,7 @@ def _autotrader_model(s, mdl, client, seen, slug, pages=AUTOTRADER_MAX_PAGES):
                 city=f'{addr["city"]}, {addr.get("state", "")}' if addr.get("city") else None,
                 zip=addr.get("zip"), lat=addr.get("latitude"), lon=addr.get("longitude"),
                 image_url=srcs[0].get("src") if srcs and isinstance(srcs[0], dict) else None,
-                kbb=to_int(pd.get("kbbFppAmount")), deal_indicator=pd.get("dealIndicator"),
+                kbb=to_int(pd.get("kbbFppAmount")) or None, deal_indicator=pd.get("dealIndicator"),  # 0 means KBB has no figure
             ))
         if new == 0:
             break
