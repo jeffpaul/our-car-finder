@@ -202,9 +202,10 @@ def scrape(cfg, models, only, db):
         if name in enabled:
             run_one(name, fn)
     # Cars.com listing pages (for vehicle history) only open in the browser, like CarMax and Facebook.
-    history, history_done = status.get("carscom", "skipped") is None, False
+    # So do its searches on days when its bot check refuses plain requests.
+    carscom, history_done = "carscom" in status, False
     browser_names = [n for n in S.BROWSER_SOURCES if n in enabled]
-    if browser_names or history:
+    if browser_names or carscom:
         try:
             with S.Browser() as b:
                 for name in browser_names:
@@ -218,7 +219,11 @@ def scrape(cfg, models, only, db):
                         enrich_facebook(cfg, models, db, b, results)
                     except Exception as e:
                         log.error("facebook details failed: %s", e)
-                if history:
+                if carscom:
+                    try:
+                        results.extend(S.carscom_refused(cfg, b))
+                    except Exception as e:
+                        log.error("cars.com searches in the browser failed: %s", e)
                     history_done = True
                     try:
                         enrich_carscom(cfg, models, db, results, b)
@@ -228,8 +233,16 @@ def scrape(cfg, models, only, db):
             log.error("browser failed to start: %s", e)
             for name in browser_names:
                 status.setdefault(name, f"browser failed: {e}"[:300])
-    if history and not history_done:  # the browser didn't start: still apply the history already stored
-        enrich_carscom(cfg, models, db, results)
+    if carscom:
+        if not history_done:  # the browser didn't start: still apply the history already stored
+            enrich_carscom(cfg, models, db, results)
+        found = sum(1 for r in results if r["source"] == "Cars.com")
+        if S.CARSCOM_REFUSED:
+            # Not a clean run: listings from the refused searches must not be marked as gone.
+            status["carscom"] = f"refused {len(S.CARSCOM_REFUSED)} searches ({', '.join(sl for _, sl in S.CARSCOM_REFUSED)}); {found} listings from the rest"[:300]
+            log.warning("carscom: %s", status["carscom"])
+        elif found:
+            status["carscom"] = None
     return results, status
 
 

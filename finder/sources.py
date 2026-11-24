@@ -56,21 +56,69 @@ def http():
 
 # --- Cars.com ---------------------------------------------------------------
 
+# Searches Cars.com refused in the last carscom() call, as (model, slug). Some days its bot check
+# turns away plain requests for a while; carscom_refused() repeats these in the stealth browser.
+CARSCOM_REFUSED = []
+_CARSCOM_SEEN = set()
+
+
 def carscom(cfg, models):
-    s, q = cfg["search"], http()
-    out, seen = [], set()
-    band = (cfg["deals"]["market_price_min"], cfg["deals"]["market_price_max"])
+    q, out, seen = http(), [], _CARSCOM_SEEN
+    seen.clear()
+    del CARSCOM_REFUSED[:]
+
+    def get(url):
+        r = q.get(url, timeout=40)
+        if r.status_code == 403:  # sometimes refuses one request and serves the next
+            time.sleep(5)
+            r = q.get(url, timeout=40)
+        return r.status_code, r.text
+
     for mdl in models:
         for slug in slugs(mdl.carscom):
-            out += _carscom_model(s, q, mdl, seen, band, slug)
+            rows, done = _carscom_model(cfg, get, mdl, seen, slug)
+            out += rows
+            if not done:
+                CARSCOM_REFUSED.append((mdl, slug))
+    return out
+
+
+def _carscom_get(get, url):
+    try:
+        return get(url)
+    except Exception as e:  # a dropped connection counts as a refusal, to be retried in the browser
+        log.warning("cars.com: %s", str(e)[:160])
+        return 599, ""
+
+
+def carscom_refused(cfg, browser):
+    """Repeats, in the stealth browser, the searches Cars.com refused. Returns the listings found;
+    searches refused here too stay in CARSCOM_REFUSED."""
+    todo, out = list(CARSCOM_REFUSED), []
+    if not todo:
+        return out
+    del CARSCOM_REFUSED[:]
+    web = CarscomPages(browser)
+    try:
+        for mdl, slug in todo:
+            rows, done = _carscom_model(cfg, lambda url: web.get(url), mdl, _CARSCOM_SEEN, slug)
+            out += rows
+            if not done:
+                CARSCOM_REFUSED.append((mdl, slug))
+    finally:
+        web.close()
+    log.info("cars.com: %d of %d refused searches worked in the browser, %d listings",
+             len(todo) - len(CARSCOM_REFUSED), len(todo), len(out))
     return out
 
 
 CARSCOM_MAX_PAGES = 20
 
 
-def _carscom_model(s, q, mdl, seen, market_band, slug):
-    out = []
+def _carscom_model(cfg, get, mdl, seen, slug):
+    """One model's search results as (listings, whether every page was served).
+    get(url) returns (HTTP status, page text)."""
+    s, out = cfg["search"], []
     # The site serves about 24 cars a page whatever page_size asks for, cheapest first.
     for page in range(1, CARSCOM_MAX_PAGES + 1):
         if page > 1:
@@ -79,21 +127,20 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
             "makes[]": mdl.make.lower(), "models[]": slug,
             "maximum_distance": s["radius_miles"], "zip": s["origin_zip"], "stock_type": "used",
             # Wider than the budget: the extra listings feed the deal-scoring price model.
-            "list_price_min": market_band[0], "list_price_max": market_band[1],
+            "list_price_min": cfg["deals"]["market_price_min"], "list_price_max": cfg["deals"]["market_price_max"],
             "year_min": s["min_year"] - 2, "mileage_max": s["max_mileage"] + 40000,
             "page_size": 100, "page": page, "sort": "list_price",
         }
         url = "https://www.cars.com/shopping/results/?" + urlencode(params)
-        r = q.get(url, timeout=40)
-        if r.status_code == 403:  # sometimes refuses one request and serves the next
-            time.sleep(5)
-            r = q.get(url, timeout=40)
-        if r.status_code != 200:
-            # One refused or unknown model must not take down the other models' searches. If every
-            # model fails, the source returns nothing and is reported as failing.
-            log.warning("cars.com: HTTP %s for %s page %d, skipping the rest of this model", r.status_code, slug, page)
-            break
-        blobs = re.findall(r'data-vehicle-details="([^"]+)"', r.text)
+        status, text = _carscom_get(get, url)
+        if status == 404:  # a model name the site doesn't have
+            log.warning("cars.com: no such model %s", slug)
+            return out, True
+        if status != 200:
+            # One refused model must not take down the other models' searches.
+            log.warning("cars.com: HTTP %s for %s page %d", status, slug, page)
+            return out, False
+        blobs = re.findall(r'data-vehicle-details="([^"]+)"', text)
         new = 0
         for b in blobs:
             d = json.loads(htmlmod.unescape(b))
@@ -110,11 +157,11 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
                 mileage=to_int(d.get("mileage")), vin=d.get("vin"),
                 seller=seller.get("dealerName") or "Private seller",
                 private=not seller.get("dealerName"), zip=seller.get("zip"),
-                image_url=d.get("primaryThumbnail"), ref=r.url,
+                image_url=d.get("primaryThumbnail"), ref=url,
             ))
         if new == 0 or len(blobs) < 20:
             break
-    return out
+    return out, True
 
 
 _HISTORY_LABELS = ("Title", "Accidents", "Owners", "Prior use", "Recalls")
@@ -173,58 +220,82 @@ def _carscom_blocked(status, text):
     return status != 200 or "Just a moment" in text[:4000] or "cf-chl" in text[:20000]
 
 
-def _carscom_open(pg, url, ref):
-    """Opens a listing page the way a shopper would and returns its HTML, or None if refused."""
-    for attempt in range(2):
-        if attempt:  # refused: look at the search results again, then retry once
-            pg.goto(ref, timeout=60000, wait_until="domcontentloaded")
-            pg.wait_for_timeout(4000)
-        resp = pg.goto(url, timeout=60000, referer=ref, wait_until="domcontentloaded")
-        if resp is not None and resp.status in (404, 410):
-            return ""  # the listing is gone
-        for _ in range(15):  # a "Just a moment..." check can clear by itself within a few seconds
-            pg.wait_for_timeout(1000)
-            text = pg.content()
-            if "Just a moment" not in pg.title() and "cf-chl" not in text[:20000]:
-                if resp is None or resp.status in (200, 403):  # 403 is the check page that then cleared
-                    return text
-    return None
+class CarscomPages:
+    """Gets Cars.com pages through the stealth browser, which passes the bot check that turns plain
+    requests away. A page is first asked for from inside the page already open (quick, nothing is
+    drawn); if that is refused, or the open page moves on by itself, the page is opened properly,
+    which also lets a "Just a moment..." check clear."""
+
+    QUICK = ("async ([u, ref]) => { const r = await fetch(u, {referrer: ref, credentials: 'include'});"
+             " return [r.status, await r.text()] }")
+
+    def __init__(self, browser):
+        self.pg = browser.page()
+        self.on_site = False      # a cars.com page is open, so quick requests are possible
+        self.quick_misses = 0     # after three, pages are only ever opened
+        self.quick = self.opened = 0
+
+    def close(self):
+        self.pg.close()
+
+    def get(self, url, ref=None):
+        """(HTTP status, page text). The status is 200 for a served page, 404 for one that is gone,
+        and 403 when the site refused it both ways."""
+        if self.on_site and self.quick_misses < 3:
+            try:
+                status, body = self.pg.evaluate(self.QUICK, [url, ref or self.pg.url])
+                if status in (404, 410):
+                    return 404, ""
+                if not _carscom_blocked(status, body):
+                    self.quick += 1
+                    return 200, body
+            except Exception:  # usually the open page reloading itself for a bot check
+                pass
+            self.quick_misses += 1
+        try:
+            return self._open(url, ref)
+        except Exception as e:
+            log.warning("cars.com: opening %s failed: %s", url[:90], str(e)[:160])
+            self.on_site = False
+            return 403, ""
+
+    def _open(self, url, ref):
+        for attempt in range(2):
+            if attempt and ref:  # refused: look at the search results again, then retry once
+                self.pg.goto(ref, timeout=60000, wait_until="domcontentloaded")
+                self.pg.wait_for_timeout(4000)
+            resp = self.pg.goto(url, timeout=60000, wait_until="domcontentloaded", **({"referer": ref} if ref else {}))
+            if resp is not None and resp.status in (404, 410):
+                return 404, ""
+            for _ in range(15):  # a "Just a moment..." check can clear by itself within a few seconds
+                self.pg.wait_for_timeout(1000)
+                try:
+                    title, text = self.pg.title(), self.pg.content()
+                except Exception:  # mid-reload
+                    continue
+                if "Just a moment" not in title and "cf-chl" not in text[:20000] and len(text) > 12000:
+                    self.on_site = True
+                    self.opened += 1
+                    return 200, text
+        self.on_site = False
+        return 403, ""
 
 
 def carscom_history(browser, todo, limit=60, delay=1.0):
-    """Reads the vehicle history from Cars.com listing pages.
+    """Reads the vehicle history from Cars.com listing pages, in the stealth browser.
 
-    todo is [(listing id, search page URL)]. Listing pages refuse plain requests (a Cloudflare
-    check), so they are read in the stealth browser: first by asking for the page from inside a
-    search results page, which is quick; if that is refused, by opening each listing. Stops after
-    two refusals in a row so the search scraper isn't put at risk. Returns {id: data}; data is {}
-    for listings without a history report."""
-    out, refused, quick = {}, 0, True
+    todo is [(listing id, search page URL)]. Stops after two refusals in a row so the search
+    scraper isn't put at risk. Returns {id: data}; data is {} for listings without a history
+    report."""
+    out, refused = {}, 0
     if not todo:
         return out
-    pg = browser.page()
+    web = CarscomPages(browser)
     try:
-        pg.goto(todo[0][1], timeout=60000, wait_until="domcontentloaded")
-        pg.wait_for_timeout(4000)
-        for n, (lid, ref) in enumerate(todo[:limit]):
-            url, text = f"https://www.cars.com/vehicledetail/{lid}/", None
-            try:
-                if quick:
-                    status, body = pg.evaluate(
-                        "async ([u, ref]) => { const r = await fetch(u, {referrer: ref, credentials: 'include'});"
-                        " return [r.status, await r.text()] }", [url, ref])
-                    if status in (404, 410):
-                        text = ""  # the listing is gone
-                    elif _carscom_blocked(status, body):
-                        log.info("cars.com history: quick request refused (HTTP %s), opening pages instead", status)
-                        quick = False
-                    else:
-                        text = body
-                if text is None:
-                    text = _carscom_open(pg, url, ref)
-            except Exception as e:
-                log.warning("cars.com history: %s failed: %s", lid, str(e)[:200])
-            if text is None:
+        web.get(todo[0][1])  # start from a search results page, as a shopper would
+        for lid, ref in todo[:limit]:
+            status, text = web.get(f"https://www.cars.com/vehicledetail/{lid}/", ref)
+            if status == 403:
                 refused += 1
                 if refused >= 2:
                     log.warning("cars.com history: refused twice in a row after %d pages, stopping", len(out))
@@ -232,11 +303,11 @@ def carscom_history(browser, todo, limit=60, delay=1.0):
                 continue
             refused = 0
             out[lid] = carscom_history_parse(text)
-            pg.wait_for_timeout(int(delay * 1000))
+            web.pg.wait_for_timeout(int(delay * 1000))
     finally:
-        pg.close()
-    log.info("cars.com history: read %d listing pages (%s), %d with a history report",
-             len(out), "quick requests" if quick else "opened one by one", sum(1 for d in out.values() if d))
+        web.close()
+    log.info("cars.com history: read %d listing pages (%d by quick request, %d opened), %d with a history report",
+             len(out), web.quick, max(web.opened - 1, 0), sum(1 for d in out.values() if d))
     return out
 
 
