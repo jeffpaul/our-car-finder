@@ -418,7 +418,7 @@ th { font-weight: 600; color: var(--ink); }
           <div><dt>Drive from home</dt><dd>${drive}</dd></div>
           <div><dt>Location</dt><dd>${esc(i.city || "Unknown")}</dd></div>
           <div><dt>Seller</dt><dd>${esc(i.seller || "—")}</dd></div>
-          ${i.history ? `<div class="wide"><dt>History · ${esc(i.history)}</dt><dd>${[i.owners && `${esc(i.owners)} owner${i.owners === "1" ? "" : "s"}`, i.accidents != null && (i.accidents === 0 ? "No accidents" : i.accidents === "reported" ? "Accident reported" : `${i.accidents} accident${i.accidents === 1 ? "" : "s"}`), i.titleStatus && `${esc(i.titleStatus.toLowerCase())} title`].filter(Boolean).join(" · ")}</dd></div>`
+          ${i.history ? `<div class="wide"><dt>History · ${esc(i.history)}</dt><dd>${[i.owners && `${esc(i.owners)} owner${i.owners === "1" ? "" : "s"}`, i.accidents != null && (i.accidents === 0 ? "No accidents" : i.accidents === "reported" ? "Accident reported" : `${i.accidents} accident${i.accidents === 1 ? "" : "s"}`), i.titleStatus && `${esc(i.titleStatus.toLowerCase())} title`, i.priorUse && esc(i.priorUse)].filter(Boolean).join(" · ")}</dd></div>`
             : i.owners ? `<div><dt>Owners</dt><dd>${esc(i.owners)} owner${i.owners === "1" ? "" : "s"}</dd></div>` : ""}
         </dl>
         ${cargo}

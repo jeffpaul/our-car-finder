@@ -154,17 +154,18 @@ def enrich_facebook(cfg, models, db, browser, rows):
                 r["extra_text"] += f' {d["title_status"]} title'
 
 
-def enrich_carscom(cfg, models, db, rows):
-    """Adds AutoCheck owners/accidents/title to in-range Cars.com rows, opening each listing page once."""
+def enrich_carscom(cfg, models, db, rows, browser=None):
+    """Adds AutoCheck owners/accidents/title to in-range Cars.com rows, reading each listing page once.
+    Without a browser it only applies the history already stored."""
     s = cfg["search"]
     cc = [r for r in rows if r["source"] == "Cars.com"]
     cached = {i: json.loads(d) for i, d in db.execute("SELECT id, data FROM carscom_history")}
     todo = [(r["id"], r["ref"]) for r in cc if r["id"] not in cached and r.get("ref") and M.identify(r["title"], models)
             and (not r["year"] or r["year"] >= s["min_year"]) and (not r["mileage"] or r["mileage"] <= s["max_mileage"])
             and r["price"] and s["price_min"] - s["near_miss_margin"] <= r["price"] <= s["price_max"] + s["near_miss_margin"]]
-    if todo:
-        log.info("cars.com: opening %d new listing pages for vehicle history (max 60)", len(todo))
-        fetched = S.carscom_history(todo)
+    if todo and browser:
+        log.info("cars.com: reading %d new listing pages for vehicle history (max 60 a run)", len(todo))
+        fetched = S.carscom_history(browser, todo)
         now = dt.datetime.now().isoformat()
         db.executemany("INSERT OR REPLACE INTO carscom_history VALUES (?,?,?)",
                        [(i, json.dumps(d), now) for i, d in fetched.items()])
@@ -172,7 +173,7 @@ def enrich_carscom(cfg, models, db, rows):
         cached.update(fetched)
     for r in cc:
         d = cached.get(r["id"]) or {}
-        r.update({k: d[k] for k in ("owners", "accidents", "title_status") if k in d})
+        r.update({k: d[k] for k in ("owners", "accidents", "title_status", "prior_use") if k in d})
         if d:
             r["history_source"] = "AutoCheck"
         if d.get("title_status") and d["title_status"].lower() != "clean":
@@ -200,13 +201,11 @@ def scrape(cfg, models, only, db):
     for name, fn in S.HTTP_SOURCES.items():
         if name in enabled:
             run_one(name, fn)
-    if status.get("carscom", "skipped") is None:
-        try:
-            enrich_carscom(cfg, models, db, results)
-        except Exception as e:
-            log.error("cars.com history failed: %s", e)
+    # Cars.com listing pages (for vehicle history) only open in the browser, like CarMax and Facebook.
+    # So do its searches on days when its bot check refuses plain requests.
+    carscom, history_done = "carscom" in status, False
     browser_names = [n for n in S.BROWSER_SOURCES if n in enabled]
-    if browser_names:
+    if browser_names or carscom:
         try:
             with S.Browser() as b:
                 for name in browser_names:
@@ -220,10 +219,30 @@ def scrape(cfg, models, only, db):
                         enrich_facebook(cfg, models, db, b, results)
                     except Exception as e:
                         log.error("facebook details failed: %s", e)
+                if carscom:
+                    try:
+                        results.extend(S.carscom_refused(cfg, b))
+                    except Exception as e:
+                        log.error("cars.com searches in the browser failed: %s", e)
+                    history_done = True
+                    try:
+                        enrich_carscom(cfg, models, db, results, b)
+                    except Exception as e:
+                        log.error("cars.com history failed: %s", e)
         except Exception as e:
             log.error("browser failed to start: %s", e)
             for name in browser_names:
                 status.setdefault(name, f"browser failed: {e}"[:300])
+    if carscom:
+        if not history_done:  # the browser didn't start: still apply the history already stored
+            enrich_carscom(cfg, models, db, results)
+        found = sum(1 for r in results if r["source"] == "Cars.com")
+        if S.CARSCOM_REFUSED:
+            # Not a clean run: listings from the refused searches must not be marked as gone.
+            status["carscom"] = f"refused {len(S.CARSCOM_REFUSED)} searches ({', '.join(sl for _, sl in S.CARSCOM_REFUSED)}); {found} listings from the rest"[:300]
+            log.warning("carscom: %s", status["carscom"])
+        elif found:
+            status["carscom"] = None
     return results, status
 
 
@@ -296,7 +315,7 @@ def normalize(raw, cfg, models, geo):
         "image_url": raw["image_url"], "links": {raw["source"]: raw["url"]},
         "flags": flags, "kbb": raw.get("kbb"), "deal_indicator": raw.get("deal_indicator"),
         "accidents": raw.get("accidents"), "title_status": raw.get("title_status"),
-        "history_source": raw.get("history_source"),
+        "history_source": raw.get("history_source"), "prior_use": raw.get("prior_use"),
         "owners": raw.get("owners") or owners_from_text((raw["title"] or "") + "\n" + (raw.get("extra_text") or "")),
     }
 
@@ -328,7 +347,7 @@ def merge(old, new):
     merged = {**old, **{k: v for k, v in new.items() if v not in (None, "", [])}}
     merged["links"] = links
     if old.get("history_source") and not new.get("history_source"):
-        for f in ("owners", "accidents", "title_status", "history_source"):
+        for f in ("owners", "accidents", "title_status", "history_source", "prior_use"):
             merged[f] = old.get(f)
     if new["price"] != old["price"]:
         history.append([dt.date.today().isoformat(), new["price"]])

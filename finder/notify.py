@@ -34,7 +34,9 @@ def describe(x):
     line = " · ".join(bits)
     d = x.get("deal")
     if d and d.get("expected") and d["label"] in ("great", "good"):
-        line += f'\n{d["label"].title()} deal: {fmt_money(d["delta"])} under {d["basis"]} ({fmt_money(d["expected"])})'
+        # Autotrader's own rating can call a car a good deal even when it is priced above the reference.
+        line += (f'\n{d["label"].title()} deal: {fmt_money(abs(d["delta"]))} {"under" if d["delta"] >= 0 else "over"} '
+                 f'{d["basis"]} ({fmt_money(d["expected"])})')
 
     extra = f'{x.get("seller") or ""} via {", ".join(x["links"])}'
     if x.get("flags"):

@@ -12,9 +12,11 @@ import json
 import logging
 import re
 import time
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode
 
 from curl_cffi import requests
+
+from . import flight
 
 log = logging.getLogger("finder")
 # A year can run into the make ("2016Honda"), but not into miles ("2000mi", "2015k").
@@ -54,34 +56,91 @@ def http():
 
 # --- Cars.com ---------------------------------------------------------------
 
+# Searches Cars.com refused in the last carscom() call, as (model, slug). Some days its bot check
+# turns away plain requests for a while; carscom_refused() repeats these in the stealth browser.
+CARSCOM_REFUSED = []
+_CARSCOM_SEEN = set()
+
+
 def carscom(cfg, models):
-    s, q = cfg["search"], http()
-    out, seen = [], set()
-    band = (cfg["deals"]["market_price_min"], cfg["deals"]["market_price_max"])
+    q, out, seen = http(), [], _CARSCOM_SEEN
+    seen.clear()
+    del CARSCOM_REFUSED[:]
+
+    def get(url):
+        r = q.get(url, timeout=40)
+        if r.status_code == 403:  # sometimes refuses one request and serves the next
+            time.sleep(5)
+            r = q.get(url, timeout=40)
+        return r.status_code, r.text
+
     for mdl in models:
         for slug in slugs(mdl.carscom):
-            out += _carscom_model(s, q, mdl, seen, band, slug)
+            rows, done = _carscom_model(cfg, get, mdl, seen, slug)
+            out += rows
+            if not done:
+                CARSCOM_REFUSED.append((mdl, slug))
     return out
 
 
-def _carscom_model(s, q, mdl, seen, market_band, slug):
-    out = []
-    for page in range(1, 6):
+def _carscom_get(get, url):
+    try:
+        return get(url)
+    except Exception as e:  # a dropped connection counts as a refusal, to be retried in the browser
+        log.warning("cars.com: %s", str(e)[:160])
+        return 599, ""
+
+
+def carscom_refused(cfg, browser):
+    """Repeats, in the stealth browser, the searches Cars.com refused. Returns the listings found;
+    searches refused here too stay in CARSCOM_REFUSED."""
+    todo, out = list(CARSCOM_REFUSED), []
+    if not todo:
+        return out
+    del CARSCOM_REFUSED[:]
+    web = CarscomPages(browser)
+    try:
+        for mdl, slug in todo:
+            rows, done = _carscom_model(cfg, lambda url: web.get(url), mdl, _CARSCOM_SEEN, slug)
+            out += rows
+            if not done:
+                CARSCOM_REFUSED.append((mdl, slug))
+    finally:
+        web.close()
+    log.info("cars.com: %d of %d refused searches worked in the browser, %d listings",
+             len(todo) - len(CARSCOM_REFUSED), len(todo), len(out))
+    return out
+
+
+CARSCOM_MAX_PAGES = 20
+
+
+def _carscom_model(cfg, get, mdl, seen, slug):
+    """One model's search results as (listings, whether every page was served).
+    get(url) returns (HTTP status, page text)."""
+    s, out = cfg["search"], []
+    # The site serves about 24 cars a page whatever page_size asks for, cheapest first.
+    for page in range(1, CARSCOM_MAX_PAGES + 1):
+        if page > 1:
+            time.sleep(1)
         params = {
             "makes[]": mdl.make.lower(), "models[]": slug,
             "maximum_distance": s["radius_miles"], "zip": s["origin_zip"], "stock_type": "used",
             # Wider than the budget: the extra listings feed the deal-scoring price model.
-            "list_price_min": market_band[0], "list_price_max": market_band[1],
+            "list_price_min": cfg["deals"]["market_price_min"], "list_price_max": cfg["deals"]["market_price_max"],
             "year_min": s["min_year"] - 2, "mileage_max": s["max_mileage"] + 40000,
             "page_size": 100, "page": page, "sort": "list_price",
         }
-        r = q.get("https://www.cars.com/shopping/results/?" + urlencode(params), timeout=40)
-        if r.status_code == 404 and page == 1:
-            # An unknown model slug must not take down the other models' searches.
-            log.warning("cars.com: no such model %r", slug)
-            break
-        r.raise_for_status()
-        blobs = re.findall(r'data-vehicle-details="([^"]+)"', r.text)
+        url = "https://www.cars.com/shopping/results/?" + urlencode(params)
+        status, text = _carscom_get(get, url)
+        if status == 404:  # a model name the site doesn't have
+            log.warning("cars.com: no such model %s", slug)
+            return out, True
+        if status != 200:
+            # One refused model must not take down the other models' searches.
+            log.warning("cars.com: HTTP %s for %s page %d", status, slug, page)
+            return out, False
+        blobs = re.findall(r'data-vehicle-details="([^"]+)"', text)
         new = 0
         for b in blobs:
             d = json.loads(htmlmod.unescape(b))
@@ -98,45 +157,157 @@ def _carscom_model(s, q, mdl, seen, market_band, slug):
                 mileage=to_int(d.get("mileage")), vin=d.get("vin"),
                 seller=seller.get("dealerName") or "Private seller",
                 private=not seller.get("dealerName"), zip=seller.get("zip"),
-                image_url=d.get("primaryThumbnail"), ref=r.url,
+                image_url=d.get("primaryThumbnail"), ref=url,
             ))
         if new == 0 or len(blobs) < 20:
             break
-    return out
+    return out, True
 
 
-def carscom_history(todo, limit=60, delay=1.5):
-    """Reads the AutoCheck history box (owners, accidents, title) from Cars.com listing pages.
+_HISTORY_LABELS = ("Title", "Accidents", "Owners", "Prior use", "Recalls")
 
-    todo is [(listing id, search page URL)]. Listing pages only load with a search page as the
-    Referer. Stops at the first block so the search scraper isn't put at risk. Returns {id: data};
-    data is {} for listings without a history box.
-    """
-    q, out = http(), {}
-    for n, (lid, ref) in enumerate(todo[:limit]):
-        if n:
-            time.sleep(delay)
+
+def carscom_history_parse(page):
+    """Vehicle history (AutoCheck) from a Cars.com listing page, as
+    {"owners", "accidents", "title_status", "prior_use"} with whatever the page gives; {} when the
+    listing has no history report.
+
+    The page states it twice: as true/false fields in its tracking data, and as a "History" box
+    (Title: Clean title, Accidents: No accidents or damage reported, Owners: 1 owner, Prior use: …).
+    The box says more, so it is read first and the fields fill in what it leaves out."""
+    data = htmlmod.unescape(page)
+
+    def field(name):
+        m = re.search(r'"%s"\s*:\s*(true|false)\b' % name, data)
+        return None if not m else m.group(1) == "true"
+
+    text = re.sub(r"\s+", " ", htmlmod.unescape(re.sub(r"<(script|style)[^>]*>.*?</\1>|<[^>]+>", " ", page, flags=re.S)))
+    box = re.search(r"Reported by (?:Experian )?AutoCheck (.{0,500})", text)
+    box = re.split(r"Get the AutoCheck Report|Seller's notes", box.group(1))[0] if box else ""
+    parts = re.split(r"\b(%s) " % "|".join(_HISTORY_LABELS), box)
+    stats = {parts[i].lower(): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
+    if not stats and not re.search(r'"vhr_source"\s*:\s*"[a-z]', data):
+        return {}
+    d = {}
+    owners = re.search(r"(\d+)\+? owner", stats.get("owners", ""), re.I)
+    if owners:
+        d["owners"] = "1" if owners.group(1) == "1" else "2+"
+    elif field("single_owner") is not None:
+        d["owners"] = "1" if field("single_owner") else "2+"
+    acc = stats.get("accidents", "")
+    count = re.search(r"(\d+) accident", acc, re.I)
+    if re.match(r"no accident", acc, re.I) or (not acc and field("no_accidents")):
+        d["accidents"] = 0
+    elif count:
+        d["accidents"] = int(count.group(1))
+    elif acc or field("no_accidents") is False:
+        d["accidents"] = "reported"  # stated without a count
+    title = stats.get("title", "")
+    if re.search(r"\bclean\b", title, re.I) or (not title and field("clean_title")):
+        d["title_status"] = "Clean"
+    elif title or field("clean_title") is False:
+        brand = re.search(r"salvage|rebuilt|flood|lemon|junk|lien", title, re.I)
+        d["title_status"] = brand.group(0).capitalize() if brand else "Branded"
+    use = stats.get("prior use", "")
+    if re.search(r"non-?personal|rental|fleet|commercial", use, re.I) or (not use and field("personal_use_only") is False):
+        d["prior_use"] = "non-personal use"
+    elif re.search(r"personal", use, re.I) or (not use and field("personal_use_only")):
+        d["prior_use"] = "personal use"
+    return d
+
+
+def _carscom_blocked(status, text):
+    return status != 200 or "Just a moment" in text[:4000] or "cf-chl" in text[:20000]
+
+
+class CarscomPages:
+    """Gets Cars.com pages through the stealth browser, which passes the bot check that turns plain
+    requests away. A page is first asked for from inside the page already open (quick, nothing is
+    drawn); if that is refused, or the open page moves on by itself, the page is opened properly,
+    which also lets a "Just a moment..." check clear."""
+
+    QUICK = ("async ([u, ref]) => { const r = await fetch(u, {referrer: ref, credentials: 'include'});"
+             " return [r.status, await r.text()] }")
+
+    def __init__(self, browser):
+        self.pg = browser.page()
+        self.on_site = False      # a cars.com page is open, so quick requests are possible
+        self.quick_misses = 0     # after three, pages are only ever opened
+        self.quick = self.opened = 0
+
+    def close(self):
+        self.pg.close()
+
+    def get(self, url, ref=None):
+        """(HTTP status, page text). The status is 200 for a served page, 404 for one that is gone,
+        and 403 when the site refused it both ways."""
+        if self.on_site and self.quick_misses < 3:
+            try:
+                status, body = self.pg.evaluate(self.QUICK, [url, ref or self.pg.url])
+                if status in (404, 410):
+                    return 404, ""
+                if not _carscom_blocked(status, body):
+                    self.quick += 1
+                    return 200, body
+            except Exception:  # usually the open page reloading itself for a bot check
+                pass
+            self.quick_misses += 1
         try:
-            r = q.get(f"https://www.cars.com/vehicledetail/{lid}/", headers={"Referer": ref}, timeout=40)
+            return self._open(url, ref)
         except Exception as e:
-            log.warning("cars.com history: %s failed: %s", lid, e)
-            continue
-        if r.status_code != 200:
-            log.warning("cars.com history: HTTP %s after %d pages, stopping", r.status_code, n)
-            break
-        stats = {k.strip().lower(): re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", htmlmod.unescape(v))).strip()
-                 for k, v in re.findall(r'<dt class="stat__label">(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>', r.text, re.S)}
-        d = {}
-        if stats.get("owner"):
-            d["owners"] = "1" if stats["owner"] == "1" else "2+"
-        acc = stats.get("accidents", "")
-        if acc.isdigit():
-            d["accidents"] = int(acc)
-        elif acc:
-            d["accidents"] = "reported"  # AutoCheck shows "Reported" without a count
-        if stats.get("title"):
-            d["title_status"] = stats["title"]
-        out[lid] = d
+            log.warning("cars.com: opening %s failed: %s", url[:90], str(e)[:160])
+            self.on_site = False
+            return 403, ""
+
+    def _open(self, url, ref):
+        for attempt in range(2):
+            if attempt and ref:  # refused: look at the search results again, then retry once
+                self.pg.goto(ref, timeout=60000, wait_until="domcontentloaded")
+                self.pg.wait_for_timeout(4000)
+            resp = self.pg.goto(url, timeout=60000, wait_until="domcontentloaded", **({"referer": ref} if ref else {}))
+            if resp is not None and resp.status in (404, 410):
+                return 404, ""
+            for _ in range(15):  # a "Just a moment..." check can clear by itself within a few seconds
+                self.pg.wait_for_timeout(1000)
+                try:
+                    title, text = self.pg.title(), self.pg.content()
+                except Exception:  # mid-reload
+                    continue
+                if "Just a moment" not in title and "cf-chl" not in text[:20000] and len(text) > 12000:
+                    self.on_site = True
+                    self.opened += 1
+                    return 200, text
+        self.on_site = False
+        return 403, ""
+
+
+def carscom_history(browser, todo, limit=60, delay=1.0):
+    """Reads the vehicle history from Cars.com listing pages, in the stealth browser.
+
+    todo is [(listing id, search page URL)]. Stops after two refusals in a row so the search
+    scraper isn't put at risk. Returns {id: data}; data is {} for listings without a history
+    report."""
+    out, refused = {}, 0
+    if not todo:
+        return out
+    web = CarscomPages(browser)
+    try:
+        web.get(todo[0][1])  # start from a search results page, as a shopper would
+        for lid, ref in todo[:limit]:
+            status, text = web.get(f"https://www.cars.com/vehicledetail/{lid}/", ref)
+            if status == 403:
+                refused += 1
+                if refused >= 2:
+                    log.warning("cars.com history: refused twice in a row after %d pages, stopping", len(out))
+                    break
+                continue
+            refused = 0
+            out[lid] = carscom_history_parse(text)
+            web.pg.wait_for_timeout(int(delay * 1000))
+    finally:
+        web.close()
+    log.info("cars.com history: read %d listing pages (%d by quick request, %d opened), %d with a history report",
+             len(out), web.quick, max(web.opened - 1, 0), sum(1 for d in out.values() if d))
     return out
 
 
@@ -223,6 +394,30 @@ class Browser:
         return self.b.new_page()
 
 
+CARMAX_MAX_PAGES = 8
+
+
+def carmax_search(pg, s, mdl, slug):
+    """Every car of this model in a CarMax search, 100 at a time. pg is a page already on carmax.com.
+
+    A slug can be a model ("jeep/wrangler-4xe") or just a make ("hyundai"), for models CarMax has no
+    address for; a make search returns every model, so only cars matching the model are kept."""
+    out = []
+    for skip in range(0, 100 * CARMAX_MAX_PAGES, 100):
+        api = (f'/cars/api/search/run?uri=/cars/{slug}'
+               f'&skip={skip}&take=100&zipCode={s["origin_zip"]}&radius={s["radius_miles"]}&shipping=-1&sort=price-asc')
+        status, body = pg.evaluate("async (u) => { const r = await fetch(u); return [r.status, await r.text()] }", api)
+        if status != 200:
+            raise RuntimeError(f"CarMax API returned HTTP {status} for {slug}")
+        data = json.loads(body)
+        page = data.get("items") or []
+        out += [c for c in page if mdl.matches(f'{c.get("make")} {c.get("model")} {c.get("trim") or ""}')]
+        pg.wait_for_timeout(800)
+        if len(page) < 100 or skip + len(page) >= (data.get("totalCount") or 0):
+            break
+    return out
+
+
 def carmax(cfg, models, browser):
     s = cfg["search"]
     items = []
@@ -230,19 +425,17 @@ def carmax(cfg, models, browser):
     try:
         pg.goto("https://www.carmax.com/cars/toyota", timeout=60000)
         pg.wait_for_timeout(4000)
-        for slug in (sl for mdl in models for sl in slugs(mdl.carmax)):
-            api = (f'/cars/api/search/run?uri=/cars/{slug}'
-                   f'&skip=0&take=100&zipCode={s["origin_zip"]}&radius={s["radius_miles"]}&shipping=-1&sort=price-asc')
-            status, body = pg.evaluate("async (u) => { const r = await fetch(u); return [r.status, await r.text()] }", api)
-            if status != 200:
-                raise RuntimeError(f"CarMax API returned HTTP {status} for {slug}")
-            items += json.loads(body).get("items", [])
-            pg.wait_for_timeout(800)
+        for mdl in models:
+            for slug in slugs(mdl.carmax):
+                items += carmax_search(pg, s, mdl, slug)
     finally:
         pg.close()
-    out = []
+    out, seen = [], set()
     for c in items:
         stock = c.get("stockNumber")
+        if stock in seen:
+            continue
+        seen.add(stock)
         out.append(blank(
             "CarMax", stock, url=f"https://www.carmax.com/car/{stock}",
             title=f'{c.get("year")} {c.get("make")} {c.get("model")} {c.get("trim") or ""}'.strip(),
@@ -268,33 +461,92 @@ AUTOTRADER_HOSTS = [
 ]
 
 
+def autotrader_page_data(text):
+    """Listing data from an Autotrader or KBB results page: {"inventory": {...}, "owners": {...}}.
+
+    Handles the streamed format the sites use now and the single JSON block they used before.
+    Returns None for a page with neither (a bot-check or error page)."""
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', text, re.S)
+    if m:
+        try:
+            return json.loads(m.group(1))["props"]["pageProps"]["__eggsState"]
+        except (ValueError, KeyError):
+            pass
+    return flight.page_data(text)
+
+
 class _AutotraderClient:
     def __init__(self):
         self.order = list(range(len(AUTOTRADER_HOSTS)))
         self.sessions = {}
+        self.unknown = set()
 
     def eggs(self, slug, params):
-        """Returns the page's __eggsState listing data from the first host that serves it."""
+        """Returns the page's listing data from the first host that serves it.
+
+        A slug can carry its own filters after a "?", e.g. "jeep/wrangler?fuelTypeGroup=PIH"."""
+        path, _, extra = slug.partition("?")
+        params = {**params, **dict(parse_qsl(extra))}
         errors = []
         for i in list(self.order):
             site, imp, tmpl = AUTOTRADER_HOSTS[i]
             q = self.sessions.setdefault(imp, requests.Session(impersonate=imp))
             try:
-                r = q.get(tmpl.format(slug=slug, q=urlencode(params)), timeout=40)
-                m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
-                if m:
-                    eggs = json.loads(m.group(1))["props"]["pageProps"]["__eggsState"]
+                r = q.get(tmpl.format(slug=path, q=urlencode(params)), timeout=40)
+                t = re.search(r"<title>(.*?)</title>", r.text, re.S)
+                title = t.group(1).strip() if t else ""
+                eggs = autotrader_page_data(r.text) if r.status_code == 200 and "unavailable" not in title.lower() else None
+                if eggs is not None:
                     if self.order[0] != i:
                         log.info("autotrader: switching to %s (%s)", site, imp)
                         self.order.remove(i)
                         self.order.insert(0, i)
+                    # An unknown model is redirected to the make's page (every Jeep, say), which
+                    # would look like a working search that finds almost nothing.
+                    if f"/{path.split('/')[-1]}" not in str(r.url):
+                        if slug not in self.unknown:
+                            self.unknown.add(slug)
+                            log.warning("autotrader: %s doesn't know the model %r (sent to %s)", site, path, str(r.url)[:100])
+                        return {"inventory": {}, "owners": {}}
                     return eggs
-                t = re.search(r"<title>(.*?)</title>", r.text, re.S)
-                errors.append(f"{site}/{imp}: HTTP {r.status_code} {t.group(1).strip()[:40] if t else ''}")
+                errors.append(f"{site}/{imp}: HTTP {r.status_code} {title[:40]}")
             except Exception as e:
                 errors.append(f"{site}/{imp}: {e}"[:80])
             time.sleep(2)
         raise RuntimeError("Autotrader and KBB both blocked: " + "; ".join(errors))
+
+
+def _name(v):
+    """Autotrader gives trim and model as {"name": ...}; tolerate a plain string too."""
+    return v.get("name") if isinstance(v, dict) else (v if isinstance(v, str) else None)
+
+
+def _at_title(it):
+    """A listing's title; some sponsored listings only fill in the long one."""
+    return next((it[k] for k in ("title", "titleLong") if isinstance(it.get(k), str) and it[k].strip()), "")
+
+
+def _squash(text):
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+def _autotrader_is(mdl, slug, it):
+    """Whether an Autotrader listing is this model.
+
+    Autotrader has no separate model for most plug-in hybrids: a RAV4 Prime is a "RAV4" whose fuel
+    type is plug-in hybrid, and its title may just say "Toyota RAV4 SE". So a slug that filters by
+    fuel (…?fuelTypeGroup=PIH) accepts any plug-in hybrid of the slug's model. Each listing is still
+    checked, because the page mixes in sponsored cars that ignore the filters."""
+    title = _at_title(it)
+    if mdl.matches(" ".join(filter(None, [_name(it.get("model")), _name(it.get("trim")), title]))):
+        return True
+    path, _, extra = slug.partition("?")
+    if "fuelTypeGroup=PIH" not in extra:
+        return False
+    fuel = it.get("fuelType")
+    fuel = " ".join(str(x) for x in fuel.values()) if isinstance(fuel, dict) else str(fuel or "")
+    base = _squash(path.split("/")[-1])
+    return "plug" in fuel.lower() and (_squash(_name(it.get("model"))).startswith(base) or base in _squash(title))
 
 
 def autotrader(cfg, models):
@@ -307,41 +559,48 @@ def autotrader(cfg, models):
     return out
 
 
-def _autotrader_model(s, mdl, client, seen, slug):
+AUTOTRADER_MAX_PAGES = 8
+
+
+def _autotrader_model(s, mdl, client, seen, slug, pages=AUTOTRADER_MAX_PAGES):
     out = []
-    for first in (0, 25, 50, 75):
+    for first in range(0, 25 * pages, 25):
         params = {
             "zip": s["origin_zip"], "searchRadius": s["radius_miles"], "startYear": s["min_year"],
             "maxPrice": s["price_max"] + s["near_miss_margin"], "maxMileage": s["max_mileage"],
             "sortBy": "derivedpriceASC", "numRecords": 25, "firstRecord": first,
         }
+        if first:
+            time.sleep(2)
         eggs = client.eggs(slug, params)
-        owners = eggs.get("owners", {})
+        owners = eggs.get("owners") or {}
         new = 0
-        for lid, it in eggs.get("inventory", {}).items():
-            # Plug-in versions may carry "4xe"/"Prime"/"Plug-in" in the trim or title, not the model name.
-            model = " ".join(filter(None, [(it.get("model") or {}).get("name"), (it.get("trim") or {}).get("name"),
-                                           it.get("title")]))
-            if lid in seen or not mdl.matches(model):
+        for lid, it in (eggs.get("inventory") or {}).items():
+            if lid in seen or not isinstance(it, dict) or it.get("listingType") == "NEW" or not _autotrader_is(mdl, slug, it):
                 continue
             seen.add(lid)
             new += 1
-            own = owners.get(str(it.get("ownerId")), {})
+            trim = _name(it.get("trim"))
+            title = re.sub(r"^(?:Used|Certified|New)\s+", "", _at_title(it))
+            if not mdl.matches(title):  # later steps identify the model from the title alone
+                title = " ".join(str(p) for p in (it.get("year"), mdl.make, mdl.model, trim) if p)
+            own = owners.get(str(it.get("ownerId"))) or (it.get("owner") if isinstance(it.get("owner"), dict) else {})
             addr = ((own.get("location") or {}).get("address") or {})
-            srcs = (it.get("images") or {}).get("sources") or []
-            pd = it.get("pricingDetail") or {}
+            images = it.get("images")
+            srcs = (images.get("sources") if isinstance(images, dict) else images) or []
+            pd = it.get("pricingDetail") if isinstance(it.get("pricingDetail"), dict) else {}
+            miles = it.get("mileage")
             out.append(blank(
                 "Autotrader", lid, url=f"https://www.autotrader.com/cars-for-sale/vehicle/{lid}",
-                title=(it.get("title") or "").replace("Used ", "", 1),
-                year=to_int(it.get("year")), trim=(it.get("trim") or {}).get("name"),
-                price=to_int(pd.get("salePrice") or pd.get("displayPrice") or pd.get("incentive")),
-                mileage=to_int((it.get("mileage") or {}).get("value")), vin=it.get("vin"),
+                title=title, year=to_int(it.get("year")), trim=trim,
+                price=to_int(pd.get("salePrice") or pd.get("displayPrice") or pd.get("incentive") or it.get("price")),
+                mileage=to_int(miles.get("value") if isinstance(miles, dict) else miles), vin=it.get("vin"),
                 seller=own.get("name") or it.get("ownerName"),
                 private=bool(own.get("privateSeller")),
                 city=f'{addr["city"]}, {addr.get("state", "")}' if addr.get("city") else None,
                 zip=addr.get("zip"), lat=addr.get("latitude"), lon=addr.get("longitude"),
-                image_url=srcs[0]["src"] if srcs else None,
-                kbb=to_int(pd.get("kbbFppAmount")), deal_indicator=pd.get("dealIndicator"),
+                image_url=srcs[0].get("src") if srcs and isinstance(srcs[0], dict) else None,
+                kbb=to_int(pd.get("kbbFppAmount")) or None, deal_indicator=pd.get("dealIndicator"),  # 0 means KBB has no figure
             ))
         if new == 0:
             break

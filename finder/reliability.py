@@ -23,14 +23,16 @@ SALES = {
     "rx": 100_000, "gx": 25_000, "mdx": 55_000, "rdx": 45_000,
     # Plug-in hybrids: rough average US sales per year since launch. These are small numbers, so one
     # recall campaign can swing the complaint rate; read the stars as a hint only.
-    "wrangler4xe": 50_000, "grandcherokee4xe": 30_000, "outlanderphev": 8_000, "tucsonphev": 10_000,
+    "wrangler4xe": 170_000, "grandcherokee4xe": 30_000, "outlanderphev": 8_000, "tucsonphev": 10_000,
     "rav4prime": 25_000,
 }
 # NHTSA files complaints under one name per variant; the RX uses the RX 350, its main version.
+# A tuple means NHTSA uses different names in different years; they are all asked for and merged.
 NHTSA_NAMES = {"crv": "CR-V", "priusv": "PRIUS V", "4runner": "4RUNNER", "rx": "RX350", "gx": "GX460",
-               # Not yet checked against the live NHTSA API. If a model shows no stars, look up the
-               # name NHTSA uses at api.nhtsa.gov/products/vehicle/models?modelYear=2023&make=<make>&issueType=c
-               "wrangler4xe": "WRANGLER 4XE", "grandcherokee4xe": "GRAND CHEROKEE 4XE",
+               # NHTSA has no separate Wrangler 4xe: its complaints are filed with every other Wrangler,
+               # so that model's stars describe the Wrangler as a whole (and SALES above counts them all).
+               "wrangler4xe": "WRANGLER",
+               "grandcherokee4xe": ("GRAND CHEROKEE PHEV", "GRAND CHEROKEE 4XE"),
                "outlanderphev": "OUTLANDER PHEV", "tucsonphev": "TUCSON PLUG-IN HYBRID", "rav4prime": "RAV4 PRIME"}
 
 # Common problems reported for each generation (first year, last year, note).
@@ -81,23 +83,37 @@ class Reliability:
     def refresh(self, models, first_year, last_year):
         """Fetches NHTSA data for model years not fetched in the last REFRESH_DAYS days."""
         http = requests.Session(impersonate="chrome")
+        # Counts fetched under other model names are wrong, so start over when the names change.
+        self.db.execute("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
+        names = json.dumps(sorted((m.key, NHTSA_NAMES.get(m.key, m.model.upper())) for m in models))
+        if self.db.execute("SELECT v FROM meta WHERE k='nhtsa_names'").fetchone() != (names,):
+            self.db.execute("DELETE FROM reliability")
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES ('nhtsa_names', ?)", (names,))
         stale = (dt.date.today() - dt.timedelta(days=REFRESH_DAYS)).isoformat()
         fresh = {(m, y) for m, y in self.db.execute("SELECT model_key, year FROM reliability WHERE fetched >= ?", (stale,))}
         n = 0
         for mdl in models:
-            name = NHTSA_NAMES.get(mdl.key, mdl.model.upper())
+            names = NHTSA_NAMES.get(mdl.key, mdl.model.upper())
+            names = (names,) if isinstance(names, str) else names
             for year in range(first_year, last_year + 1):
                 if (mdl.key, year) in fresh or not any(lo <= year <= hi for lo, hi, *_ in mdl.cargo):
                     continue
+                complaints, recalls = {}, {}
                 try:
-                    params = {"make": mdl.make, "model": name, "modelYear": year}
-                    comp = http.get("https://api.nhtsa.gov/complaints/complaintsByVehicle", params=params, timeout=30).json()
-                    rec = http.get("https://api.nhtsa.gov/recalls/recallsByVehicle", params=params, timeout=30).json()
+                    for name in names:
+                        params = {"make": mdl.make, "model": name, "modelYear": year}
+                        comp = http.get("https://api.nhtsa.gov/complaints/complaintsByVehicle", params=params, timeout=30).json()
+                        rec = http.get("https://api.nhtsa.gov/recalls/recallsByVehicle", params=params, timeout=30).json()
+                        # Keyed by NHTSA's own ids, so a record returned under two names counts once.
+                        for i, c in enumerate(comp.get("results", [])):
+                            complaints[c.get("odiNumber") or (name, i)] = c
+                        for i, r in enumerate(rec.get("results", [])):
+                            recalls[r.get("NHTSACampaignNumber") or (name, i)] = r
                 except Exception as e:
                     log.warning("NHTSA lookup failed for %s %s: %s", year, mdl.model, e)
                     continue
                 counts, counted = {}, 0
-                for c in comp.get("results", []):
+                for c in complaints.values():
                     parts = {p.split(":")[0].strip() for p in (c.get("components") or "").split(",") if p.strip()}
                     if parts and parts <= SKIP_COMPONENTS:
                         continue
@@ -106,7 +122,7 @@ class Reliability:
                         counts[p] = counts.get(p, 0) + 1
                 top = sorted(counts.items(), key=lambda kv: -kv[1])[:4]
                 self.db.execute("INSERT OR REPLACE INTO reliability VALUES (?,?,?,?,?,?,?)",
-                                (mdl.key, year, comp.get("count", 0), counted, rec.get("Count", 0),
+                                (mdl.key, year, len(complaints), counted, len(recalls),
                                  json.dumps(top), dt.date.today().isoformat()))
                 n += 1
         self.db.commit()
