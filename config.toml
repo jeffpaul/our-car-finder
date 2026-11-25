@@ -32,13 +32,12 @@ radius_miles = 100
 min_year = 2021
 # Same cap the tracker's MarketCheck query uses (MC_MAX_MILES).
 max_mileage = 60000
-# The tracker has no budget; it scores everything. This tool needs a ceiling, so $45,000 covers about
-# 95% of what the tracker currently lists (lower it to your real ceiling to cut noise).
+# JP's budget ceiling (set 2026-11-25). Cars up to $2,000 over it still show as "near misses".
 # No lower limit: a good or great deal under $15k should still show up. The pipeline already drops
 # anything under $1,000 and labels cars priced 40% or more under market as "suspect" (usually a
 # down-payment ad or a branded title) without sending a notification for them.
 price_min = 0
-price_max = 45000
+price_max = 30000
 # Listings this far outside the price range are kept as "near misses".
 near_miss_margin = 2000
 
